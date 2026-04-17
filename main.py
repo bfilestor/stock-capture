@@ -10,6 +10,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from db.database import DatabaseBootstrap
+from ui.settings_window import SettingsWindow
 from utils.logging_config import get_logger, setup_logging
 from utils.app_paths import get_db_path
 from tray.tray_manager import TrayManager
@@ -39,11 +40,21 @@ def bootstrap() -> QApplication:
     db_bootstrap.initialize()
     setattr(app, "_db_bootstrap", db_bootstrap)
 
+    settings_window = SettingsWindow(db_bootstrap.db_path)
+    setattr(app, "_settings_window", settings_window)
+
+    def show_settings_window() -> None:
+        """显示设置窗口。"""
+        logger.debug("打开设置窗口")
+        settings_window.show()
+        settings_window.raise_()
+        settings_window.activateWindow()
+
     # 创建托盘管理器并绑定默认动作，具体业务窗口在后续 Issue 落地。
     tray_manager = TrayManager(app)
     tray_manager.bind_events(
         on_capture=lambda: logger.info("截图入口尚未实现，将在后续 Issue 完成"),
-        on_settings=lambda: logger.info("设置入口尚未实现，将在后续 Issue 完成"),
+        on_settings=show_settings_window,
         on_exit=lambda: logger.info("收到退出请求，开始安全退出"),
     )
     tray_manager.initialize()
