@@ -64,6 +64,7 @@ def bootstrap() -> QApplication:
                 capture_workflow.context.capture_type_id,
                 capture_workflow.context.capture_type_name,
             )
+            capture_workflow.start_capture_overlay()
         else:
             logger.warning("截图入口未继续：%s", message)
 

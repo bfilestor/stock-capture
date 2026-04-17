@@ -12,4 +12,4 @@ class CaptureContext:
     capture_type_id: int | None = None
     capture_type_name: str = ""
     image_path: str = ""
-
+    state: str = "idle"

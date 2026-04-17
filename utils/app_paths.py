@@ -33,3 +33,11 @@ def get_db_path() -> Path:
     if custom_path:
         return Path(custom_path)
     return get_data_dir() / "stock_capture.db"
+
+
+def get_capture_temp_dir() -> Path:
+    """返回临时截图目录。"""
+    custom_dir = os.getenv("STOCK_CAPTURE_CAPTURE_DIR")
+    if custom_dir:
+        return Path(custom_dir)
+    return get_project_root() / "runtime" / "captures"
