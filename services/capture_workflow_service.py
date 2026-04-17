@@ -14,6 +14,7 @@ from services.ocr_service import OCRService
 from ui.capture.capture_overlay import CaptureOverlay
 from ui.capture.capture_preview_dialog import CapturePreviewDialog
 from ui.capture.capture_type_selector_dialog import CaptureTypeSelectorDialog
+from ui.result.result_confirm_dialog import ResultConfirmDialog
 from utils.logging_config import get_logger
 from workers.capture_context import CaptureContext
 
@@ -28,6 +29,7 @@ class CaptureWorkflowService:
         dialog_factory: Callable[[list[dict], QWidget | None], QDialog] | None = None,
         overlay_factory: Callable[[QWidget | None], CaptureOverlay] | None = None,
         preview_factory: Callable[[str, str, QWidget | None], QDialog] | None = None,
+        result_dialog_factory: Callable[[str, str, str, QWidget | None], QDialog] | None = None,
         on_parse_requested: Callable[[CaptureContext], None] | None = None,
         analysis_pipeline: AnalysisPipelineService | None = None,
     ) -> None:
@@ -44,6 +46,14 @@ class CaptureWorkflowService:
                 image_path=image_path, capture_type_name=capture_type_name, parent=parent
             )
         )
+        self._result_dialog_factory = result_dialog_factory or (
+            lambda capture_type_name, ocr_text, ai_text, parent: ResultConfirmDialog(
+                capture_type_name=capture_type_name,
+                ocr_text=ocr_text,
+                ai_text=ai_text,
+                parent=parent,
+            )
+        )
         self._on_parse_requested = on_parse_requested
         self._analysis_pipeline = analysis_pipeline or AnalysisPipelineService(
             ocr_service=OCRService(),
@@ -52,6 +62,7 @@ class CaptureWorkflowService:
         self.context = CaptureContext()
         self._overlay: CaptureOverlay | None = None
         self._preview_dialog: QDialog | None = None
+        self._result_dialog: QDialog | None = None
 
     def select_capture_type(self) -> tuple[bool, str]:
         """打开业务类型面板并写入上下文。"""
@@ -183,6 +194,7 @@ class CaptureWorkflowService:
         self.context.ai_raw_response = ai_raw_text
         self.context.state = "editing"
         self._show_preview_complete("解析完成，准备进入结果确认")
+        self._open_result_dialog()
         if self._on_parse_requested is not None:
             self._on_parse_requested(self.context)
 
@@ -209,3 +221,25 @@ class CaptureWorkflowService:
             self._preview_dialog.mark_send_complete(message)  # type: ignore[attr-defined]
         else:
             self._logger.debug(message)
+
+    def _open_result_dialog(self) -> None:
+        """打开结果确认窗口。"""
+        self._result_dialog = self._result_dialog_factory(
+            self.context.capture_type_name,
+            self.context.ocr_text,
+            self.context.ai_content,
+            self._parent,
+        )
+        if hasattr(self._result_dialog, "save_requested"):
+            self._result_dialog.save_requested.connect(self._on_result_save_requested)  # type: ignore[attr-defined]
+        self._result_dialog.show()
+        self._result_dialog.activateWindow()
+        self._logger.debug("结果确认窗口已打开")
+
+    def _on_result_save_requested(self, result_date: str, json_text: str) -> None:
+        """处理结果窗口的入库请求（E5-S2-I1 将接入数据库写入）。"""
+        self._logger.debug(
+            "收到入库请求，result_date=%s, json_len=%s", result_date, len(json_text)
+        )
+        if self._result_dialog is not None and hasattr(self._result_dialog, "set_status"):
+            self._result_dialog.set_status("入库功能将在后续 Issue 完整实现")  # type: ignore[attr-defined]
