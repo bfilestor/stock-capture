@@ -32,9 +32,15 @@ def bootstrap() -> QApplication:
 
     app = create_application()
 
-    # 先创建托盘管理器占位对象，具体菜单逻辑在后续 Issue 实现。
+    # 创建托盘管理器并绑定默认动作，具体业务窗口在后续 Issue 落地。
     tray_manager = TrayManager(app)
+    tray_manager.bind_events(
+        on_capture=lambda: logger.info("截图入口尚未实现，将在后续 Issue 完成"),
+        on_settings=lambda: logger.info("设置入口尚未实现，将在后续 Issue 完成"),
+        on_exit=lambda: logger.info("收到退出请求，开始安全退出"),
+    )
     tray_manager.initialize()
+    setattr(app, "_tray_manager", tray_manager)
 
     auto_close_ms = int(os.getenv("STOCK_CAPTURE_AUTOCLOSE_MS", "0") or "0")
     if auto_close_ms > 0:
