@@ -17,6 +17,8 @@ from PySide6.QtWidgets import (
     QDialog,
 )
 
+from services.errors import ServiceError
+from services.result_service import ResultService
 from utils.logging_config import get_logger
 
 
@@ -30,6 +32,7 @@ class ResultConfirmDialog(QDialog):
         capture_type_name: str,
         ocr_text: str,
         ai_text: str,
+        result_service: ResultService | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """初始化结果确认窗口。"""
@@ -38,6 +41,7 @@ class ResultConfirmDialog(QDialog):
         self._capture_type_name = capture_type_name
         self._ocr_text = ocr_text
         self._ai_text = ai_text
+        self._result_service = result_service or ResultService()
         self.setWindowTitle("结果确认")
         self.resize(900, 680)
         self._init_ui()
@@ -92,6 +96,7 @@ class ResultConfirmDialog(QDialog):
         layout.addWidget(self.status_label)
 
         self.save_button.clicked.connect(self._on_save_clicked)
+        self.format_button.clicked.connect(self._on_format_clicked)
 
     def _toggle_ocr_area(self, checked: bool) -> None:
         """切换 OCR 折叠区域显示状态。"""
@@ -102,8 +107,22 @@ class ResultConfirmDialog(QDialog):
         """触发入库请求信号。"""
         result_date = self.date_edit.date().toString("yyyy-MM-dd")
         json_text = self.ai_text_edit.toPlainText()
-        self._logger.debug("点击入库，result_date=%s, json_len=%s", result_date, len(json_text))
-        self.save_requested.emit(result_date, json_text)
+        try:
+            self._result_service.validate_json_text(json_text)
+            self._logger.debug("点击入库，result_date=%s, json_len=%s", result_date, len(json_text))
+            self.save_requested.emit(result_date, json_text)
+        except ServiceError as exc:
+            self.set_status(str(exc), is_error=True)
+
+    def _on_format_clicked(self) -> None:
+        """格式化 JSON 内容。"""
+        json_text = self.ai_text_edit.toPlainText()
+        try:
+            formatted = self._result_service.format_json_text(json_text)
+            self.ai_text_edit.setPlainText(formatted)
+            self.set_status("JSON 格式化成功")
+        except ServiceError as exc:
+            self.set_status(str(exc), is_error=True)
 
     def current_date_text(self) -> str:
         """返回当前选择日期字符串。"""
@@ -119,4 +138,3 @@ class ResultConfirmDialog(QDialog):
     def today_text() -> str:
         """返回当天日期（yyyy-MM-dd）。"""
         return date.today().strftime("%Y-%m-%d")
-
