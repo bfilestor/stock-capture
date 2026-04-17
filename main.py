@@ -44,7 +44,20 @@ def bootstrap() -> QApplication:
 
     config_service = ConfigService(db_bootstrap.db_path)
     settings_window = SettingsWindow(config_service)
-    capture_workflow = CaptureWorkflowService(config_service)
+
+    def handle_parse_requested(context) -> None:
+        """处理发送解析入口（后续接OCR+AI链路）。"""
+        logger.info(
+            "发送解析准备完成，capture_type_id=%s, capture_type_name=%s, image_path=%s",
+            context.capture_type_id,
+            context.capture_type_name,
+            context.image_path,
+        )
+
+    capture_workflow = CaptureWorkflowService(
+        config_service,
+        on_parse_requested=handle_parse_requested,
+    )
     setattr(app, "_settings_window", settings_window)
     setattr(app, "_capture_workflow", capture_workflow)
 

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 from PySide6.QtWidgets import QDialog, QWidget
 
 from services.config_service import ConfigService
 from ui.capture.capture_overlay import CaptureOverlay
+from ui.capture.capture_preview_dialog import CapturePreviewDialog
 from ui.capture.capture_type_selector_dialog import CaptureTypeSelectorDialog
 from utils.logging_config import get_logger
 from workers.capture_context import CaptureContext
@@ -22,6 +24,8 @@ class CaptureWorkflowService:
         parent: QWidget | None = None,
         dialog_factory: Callable[[list[dict], QWidget | None], QDialog] | None = None,
         overlay_factory: Callable[[QWidget | None], CaptureOverlay] | None = None,
+        preview_factory: Callable[[str, str, QWidget | None], QDialog] | None = None,
+        on_parse_requested: Callable[[CaptureContext], None] | None = None,
     ) -> None:
         """初始化截图工作流服务。"""
         self._logger = get_logger(__name__)
@@ -31,8 +35,15 @@ class CaptureWorkflowService:
             lambda capture_types, parent: CaptureTypeSelectorDialog(capture_types, parent)
         )
         self._overlay_factory = overlay_factory or (lambda parent: CaptureOverlay(parent=parent))
+        self._preview_factory = preview_factory or (
+            lambda image_path, capture_type_name, parent: CapturePreviewDialog(
+                image_path=image_path, capture_type_name=capture_type_name, parent=parent
+            )
+        )
+        self._on_parse_requested = on_parse_requested
         self.context = CaptureContext()
         self._overlay: CaptureOverlay | None = None
+        self._preview_dialog: QDialog | None = None
 
     def select_capture_type(self) -> tuple[bool, str]:
         """打开业务类型面板并写入上下文。"""
@@ -78,6 +89,7 @@ class CaptureWorkflowService:
         self.context.image_path = image_path
         self.context.state = "previewing"
         self._logger.debug("截图完成，image_path=%s", image_path)
+        self._open_preview_dialog()
 
     def _on_capture_cancelled(self) -> None:
         """处理截图取消事件。"""
@@ -88,3 +100,45 @@ class CaptureWorkflowService:
         """处理截图错误事件。"""
         self.context.state = "capturing"
         self._logger.warning("截图错误: %s", message)
+
+    def _open_preview_dialog(self) -> None:
+        """打开截图预览窗口。"""
+        self._preview_dialog = self._preview_factory(
+            self.context.image_path, self.context.capture_type_name, self._parent
+        )
+        if hasattr(self._preview_dialog, "retake_requested"):
+            self._preview_dialog.retake_requested.connect(self._on_retake_requested)  # type: ignore[attr-defined]
+        if hasattr(self._preview_dialog, "send_requested"):
+            self._preview_dialog.send_requested.connect(self._on_send_requested)  # type: ignore[attr-defined]
+        self._preview_dialog.show()
+        self._preview_dialog.activateWindow()
+        self._logger.debug("截图预览窗口已打开")
+
+    def _remove_temp_image(self) -> None:
+        """删除当前临时截图。"""
+        if not self.context.image_path:
+            return
+        image_path = Path(self.context.image_path)
+        if image_path.exists():
+            image_path.unlink()
+            self._logger.debug("已清理旧截图文件: %s", image_path)
+
+    def _on_retake_requested(self) -> None:
+        """处理重截流程。"""
+        self._logger.debug("收到重截请求，准备重新进入截图")
+        self._remove_temp_image()
+        self.context.image_path = ""
+        self.context.state = "capturing"
+        self.start_capture_overlay()
+
+    def _on_send_requested(self, image_path: str) -> None:
+        """处理发送解析入口。"""
+        self.context.image_path = image_path
+        self.context.state = "ocr_processing"
+        self._logger.debug(
+            "发送解析入口触发，capture_type_id=%s, image_path=%s",
+            self.context.capture_type_id,
+            image_path,
+        )
+        if self._on_parse_requested is not None:
+            self._on_parse_requested(self.context)
