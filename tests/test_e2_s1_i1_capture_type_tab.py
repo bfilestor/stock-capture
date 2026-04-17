@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -11,9 +10,6 @@ from PySide6.QtWidgets import QApplication
 from db.database import DatabaseBootstrap
 from services.config_service import CaptureTypePayload, ConfigService
 from ui.settings.capture_type_tab import CaptureTypeTab
-
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(scope="module")
@@ -26,13 +22,9 @@ def app() -> QApplication:
 
 
 @pytest.fixture
-def db_path() -> Path:
+def db_path(tmp_path: Path) -> Path:
     """创建独立测试数据库。"""
-    runtime_root = PROJECT_ROOT / "tests" / "tmp_runtime" / "e2_s1_i1"
-    if runtime_root.exists():
-        shutil.rmtree(runtime_root)
-    runtime_root.mkdir(parents=True, exist_ok=True)
-    path = runtime_root / "stock_capture.db"
+    path = tmp_path / "stock_capture.db"
     DatabaseBootstrap(path).initialize()
     return path
 
@@ -76,4 +68,3 @@ def test_bt_e2_s1_i1_01_名称重复保存失败并保留编辑内容(
     assert "已存在" in tab.status_label.text()
     assert tab.name_edit.text() == "市场总览"
     assert tab.prompt_edit.toPlainText() == "模板B"
-

@@ -29,9 +29,8 @@ class SettingsWindow(QWidget):
         layout = QVBoxLayout(self)
         tab_widget = QTabWidget(self)
         self.capture_tab = CaptureTypeTab(self._config_service, self)
-        self.ai_tab = AIProviderTab(self)
+        self.ai_tab = AIProviderTab(self._config_service, self)
         tab_widget.addTab(self.capture_tab, "业务类型")
         tab_widget.addTab(self.ai_tab, "AI配置")
         layout.addWidget(tab_widget)
         self._logger.debug("设置窗口初始化完成")
-
