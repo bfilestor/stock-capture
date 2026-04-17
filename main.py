@@ -10,6 +10,8 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from db.database import DatabaseBootstrap
+from services.capture_workflow_service import CaptureWorkflowService
+from services.config_service import ConfigService
 from ui.settings_window import SettingsWindow
 from utils.logging_config import get_logger, setup_logging
 from utils.app_paths import get_db_path
@@ -40,8 +42,11 @@ def bootstrap() -> QApplication:
     db_bootstrap.initialize()
     setattr(app, "_db_bootstrap", db_bootstrap)
 
-    settings_window = SettingsWindow(db_bootstrap.db_path)
+    config_service = ConfigService(db_bootstrap.db_path)
+    settings_window = SettingsWindow(config_service)
+    capture_workflow = CaptureWorkflowService(config_service)
     setattr(app, "_settings_window", settings_window)
+    setattr(app, "_capture_workflow", capture_workflow)
 
     def show_settings_window() -> None:
         """显示设置窗口。"""
@@ -50,10 +55,22 @@ def bootstrap() -> QApplication:
         settings_window.raise_()
         settings_window.activateWindow()
 
+    def start_capture_flow() -> None:
+        """启动截图入口流程。"""
+        success, message = capture_workflow.select_capture_type()
+        if success:
+            logger.info(
+                "已选择业务类型，capture_type_id=%s, capture_type_name=%s",
+                capture_workflow.context.capture_type_id,
+                capture_workflow.context.capture_type_name,
+            )
+        else:
+            logger.warning("截图入口未继续：%s", message)
+
     # 创建托盘管理器并绑定默认动作，具体业务窗口在后续 Issue 落地。
     tray_manager = TrayManager(app)
     tray_manager.bind_events(
-        on_capture=lambda: logger.info("截图入口尚未实现，将在后续 Issue 完成"),
+        on_capture=start_capture_flow,
         on_settings=show_settings_window,
         on_exit=lambda: logger.info("收到退出请求，开始安全退出"),
     )

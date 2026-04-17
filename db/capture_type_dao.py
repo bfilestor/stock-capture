@@ -44,6 +44,19 @@ class CaptureTypeDAO(BaseDAO):
                 return None
             return dict(row)
 
+    def list_enabled(self) -> list[dict[str, Any]]:
+        """查询启用中的业务类型。"""
+        sql = """
+        SELECT id, name, description, prompt_template, is_enabled, created_at, updated_at
+        FROM capture_types
+        WHERE is_enabled = 1
+        ORDER BY id ASC
+        """
+        with self.transaction() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(sql).fetchall()
+            return [dict(row) for row in rows]
+
     def create(
         self,
         *,
@@ -91,4 +104,3 @@ class CaptureTypeDAO(BaseDAO):
         """删除业务类型并返回影响行数。"""
         sql = "DELETE FROM capture_types WHERE id = ?"
         return self.execute_write(sql, (capture_type_id,))
-

@@ -76,6 +76,10 @@ class ConfigService(BaseService):
         """查询全部业务类型。"""
         return self._capture_type_dao.list_all()
 
+    def list_enabled_capture_types(self) -> list[dict[str, Any]]:
+        """查询启用中的业务类型。"""
+        return self._capture_type_dao.list_enabled()
+
     def create_capture_type(self, payload: CaptureTypePayload) -> int:
         """创建业务类型。"""
         self._validate_capture_type(payload)

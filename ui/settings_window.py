@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtWidgets import QTabWidget, QVBoxLayout, QWidget
 
 from services.config_service import ConfigService
@@ -15,11 +13,11 @@ from utils.logging_config import get_logger
 class SettingsWindow(QWidget):
     """设置窗口，包含业务类型与AI配置两个页签。"""
 
-    def __init__(self, db_path: Path, parent: QWidget | None = None) -> None:
+    def __init__(self, config_service: ConfigService, parent: QWidget | None = None) -> None:
         """初始化设置窗口。"""
         super().__init__(parent)
         self._logger = get_logger(__name__)
-        self._config_service = ConfigService(db_path)
+        self._config_service = config_service
         self.setWindowTitle("设置")
         self.resize(980, 640)
         self._init_ui()
