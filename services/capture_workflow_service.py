@@ -17,6 +17,7 @@ from ui.capture.capture_overlay import CaptureOverlay
 from ui.capture.capture_preview_dialog import CapturePreviewDialog
 from ui.capture.capture_type_selector_dialog import CaptureTypeSelectorDialog
 from ui.result.result_confirm_dialog import ResultConfirmDialog
+from utils.error_presenter import to_error_view
 from utils.logging_config import get_logger
 from workers.capture_context import CaptureContext
 
@@ -205,7 +206,9 @@ class CaptureWorkflowService:
     def _on_pipeline_error(self, code: str, message: str) -> None:
         """处理解析失败。"""
         self.context.state = "failed"
-        self._show_preview_retry(f"解析失败：{code} - {message}")
+        error_view = to_error_view(ServiceError(code, message))
+        self._logger.error("解析失败，code=%s, raw_message=%s", error_view.code, error_view.raw_message)
+        self._show_preview_retry(error_view.to_ui_text())
 
     def _show_preview_stage(self, stage: str) -> None:
         """更新预览窗口阶段提示。"""
@@ -260,5 +263,11 @@ class CaptureWorkflowService:
                 self._result_dialog.set_status(message)  # type: ignore[attr-defined]
         except ServiceError as exc:
             self.context.state = "failed"
+            error_view = to_error_view(exc)
+            self._logger.error(
+                "结果入库失败，code=%s, raw_message=%s",
+                error_view.code,
+                error_view.raw_message,
+            )
             if self._result_dialog is not None and hasattr(self._result_dialog, "set_status"):
-                self._result_dialog.set_status(str(exc), is_error=True)  # type: ignore[attr-defined]
+                self._result_dialog.set_status(error_view.to_ui_text(), is_error=True)  # type: ignore[attr-defined]
