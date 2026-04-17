@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Callable
 
 from PySide6.QtGui import QAction, QIcon
-from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QMenu, QStyle, QSystemTrayIcon
 
 from utils.logging_config import get_logger
 
@@ -40,10 +40,34 @@ class TrayManager:
         if self._tray_icon_factory is not None:
             return self._tray_icon_factory(self._app)
         tray_icon = QSystemTrayIcon(self._app)
+        tray_icon.setIcon(self._resolve_tray_icon())
         if tray_icon.icon().isNull():
-            # 设置一个空图标占位，避免平台报错。
-            tray_icon.setIcon(QIcon())
+            self._logger.warning("托盘图标仍为空，可能导致系统托盘无法显示图标")
+        else:
+            self._logger.debug("托盘图标设置完成")
         return tray_icon
+
+    def _resolve_tray_icon(self) -> QIcon:
+        """解析可用托盘图标，避免托盘显示时无图标。"""
+        app_icon = self._app.windowIcon()
+        if not app_icon.isNull():
+            self._logger.debug("托盘图标来源：QApplication.windowIcon")
+            return app_icon
+
+        style = self._app.style()
+        if style is not None:
+            standard_icon = style.standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)
+            if not standard_icon.isNull():
+                self._logger.debug("托盘图标来源：QStyle.SP_ComputerIcon")
+                return standard_icon
+
+        theme_icon = QIcon.fromTheme("applications-system")
+        if not theme_icon.isNull():
+            self._logger.debug("托盘图标来源：QIcon.fromTheme(applications-system)")
+            return theme_icon
+
+        self._logger.warning("未找到可用托盘图标来源，返回空图标")
+        return QIcon()
 
     def _build_menu(self) -> QMenu:
         """构建固定三项菜单。"""

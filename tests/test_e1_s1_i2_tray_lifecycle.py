@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import pytest
+from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QMenu
 
 from tray.tray_manager import TrayManager
@@ -96,3 +97,21 @@ def test_bt_e1_s1_i2_01_重复触发退出保持幂等(app: QApplication) -> Non
     assert fake_tray_icon.hide_count == 1
     assert fake_tray_icon.delete_count == 1
 
+
+def test_bt_e1_s1_i2_02_创建托盘图标会继承应用图标(app: QApplication) -> None:
+    """边界测试：创建托盘图标时必须设置非空图标。"""
+    original_icon = app.windowIcon()
+    pixmap = QPixmap(16, 16)
+    pixmap.fill(QColor("#1677FF"))
+    app.setWindowIcon(QIcon(pixmap))
+
+    tray_icon = None
+    try:
+        manager = TrayManager(app)
+        tray_icon = manager._create_tray_icon()
+        assert tray_icon.icon().isNull() is False
+    finally:
+        if tray_icon is not None:
+            tray_icon.hide()
+            tray_icon.deleteLater()
+        app.setWindowIcon(original_icon)
