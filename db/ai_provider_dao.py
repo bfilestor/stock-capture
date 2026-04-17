@@ -30,6 +30,31 @@ class AIProviderDAO(BaseDAO):
             self._logger.debug("查询供应商完成，数量=%s", len(result))
             return result
 
+    def get_by_id(self, provider_id: int) -> dict[str, Any] | None:
+        """按ID查询供应商。"""
+        sql = """
+        SELECT id, name, api_base_url, api_key, is_enabled, is_default
+        FROM ai_providers
+        WHERE id = ?
+        """
+        with self.transaction() as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(sql, (provider_id,)).fetchone()
+            return dict(row) if row else None
+
+    def list_enabled(self) -> list[dict[str, Any]]:
+        """查询启用中的供应商。"""
+        sql = """
+        SELECT id, name, api_base_url, api_key, is_enabled, is_default
+        FROM ai_providers
+        WHERE is_enabled = 1
+        ORDER BY is_default DESC, id ASC
+        """
+        with self.transaction() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(sql).fetchall()
+            return [dict(row) for row in rows]
+
     def create(
         self,
         *,
@@ -107,6 +132,19 @@ class AIModelDAO(BaseDAO):
             result = [dict(row) for row in rows]
             self._logger.debug("查询模型完成，provider_id=%s, 数量=%s", provider_id, len(result))
             return result
+
+    def list_enabled_by_provider(self, provider_id: int) -> list[dict[str, Any]]:
+        """查询指定供应商的启用模型。"""
+        sql = """
+        SELECT id, provider_id, model_code, model_name, is_enabled, is_default
+        FROM ai_models
+        WHERE provider_id = ? AND is_enabled = 1
+        ORDER BY is_default DESC, id ASC
+        """
+        with self.transaction() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(sql, (provider_id,)).fetchall()
+            return [dict(row) for row in rows]
 
     def get_by_id(self, model_id: int) -> dict[str, Any] | None:
         """按ID查询模型。"""
@@ -186,4 +224,3 @@ class AIModelDAO(BaseDAO):
         """删除模型。"""
         sql = "DELETE FROM ai_models WHERE id = ?"
         return self.execute_write(sql, (model_id,))
-

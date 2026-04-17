@@ -60,9 +60,12 @@ class AIProviderTab(QWidget):
         self.provider_name_edit = QLineEdit(self)
         self.provider_url_edit = QLineEdit(self)
         self.provider_key_edit = QLineEdit(self)
+        self.provider_key_edit.setEchoMode(QLineEdit.Password)
         self.provider_enabled_checkbox = QCheckBox("启用供应商", self)
         self.provider_enabled_checkbox.setChecked(True)
         self.provider_default_checkbox = QCheckBox("设为默认供应商", self)
+        self.provider_key_toggle_button = QPushButton("显示Key", self)
+        self.provider_test_button = QPushButton("测试连接", self)
 
         provider_form = QFormLayout()
         provider_form.addRow("供应商名称*", self.provider_name_edit)
@@ -79,6 +82,8 @@ class AIProviderTab(QWidget):
         provider_button_layout.addWidget(self.provider_new_button)
         provider_button_layout.addWidget(self.provider_save_button)
         provider_button_layout.addWidget(self.provider_delete_button)
+        provider_button_layout.addWidget(self.provider_key_toggle_button)
+        provider_button_layout.addWidget(self.provider_test_button)
         provider_layout.addLayout(provider_button_layout)
 
         splitter.addWidget(provider_panel)
@@ -126,6 +131,8 @@ class AIProviderTab(QWidget):
         self.provider_new_button.clicked.connect(self.new_provider)
         self.provider_save_button.clicked.connect(self.save_provider)
         self.provider_delete_button.clicked.connect(self.delete_provider)
+        self.provider_key_toggle_button.clicked.connect(self.toggle_key_visibility)
+        self.provider_test_button.clicked.connect(self.test_connection)
         self.model_new_button.clicked.connect(self.new_model)
         self.model_save_button.clicked.connect(self.save_model)
         self.model_delete_button.clicked.connect(self.delete_model)
@@ -189,6 +196,8 @@ class AIProviderTab(QWidget):
         self.provider_name_edit.clear()
         self.provider_url_edit.clear()
         self.provider_key_edit.clear()
+        self.provider_key_edit.setEchoMode(QLineEdit.Password)
+        self.provider_key_toggle_button.setText("显示Key")
         self.provider_enabled_checkbox.setChecked(True)
         self.provider_default_checkbox.setChecked(False)
         self.provider_list.clearSelection()
@@ -216,6 +225,8 @@ class AIProviderTab(QWidget):
         self.provider_name_edit.setText(str(row.get("name", "")))
         self.provider_url_edit.setText(str(row.get("api_base_url", "")))
         self.provider_key_edit.setText(str(row.get("api_key", "")))
+        self.provider_key_edit.setEchoMode(QLineEdit.Password)
+        self.provider_key_toggle_button.setText("显示Key")
         self.provider_enabled_checkbox.setChecked(int(row.get("is_enabled", 0)) == 1)
         self.provider_default_checkbox.setChecked(int(row.get("is_default", 0)) == 1)
         self._set_status("已加载供应商详情")
@@ -336,3 +347,31 @@ class AIProviderTab(QWidget):
             self._set_status(str(exc), is_error=True)
             return False
 
+    def toggle_key_visibility(self) -> None:
+        """切换 API Key 明文显示状态。"""
+        if self.provider_key_edit.echoMode() == QLineEdit.Password:
+            self.provider_key_edit.setEchoMode(QLineEdit.Normal)
+            self.provider_key_toggle_button.setText("隐藏Key")
+            self._set_status("已显示 API Key（注意信息安全）")
+        else:
+            self.provider_key_edit.setEchoMode(QLineEdit.Password)
+            self.provider_key_toggle_button.setText("显示Key")
+            self._set_status("已隐藏 API Key")
+
+    def test_connection(self) -> bool:
+        """测试当前供应商连接。"""
+        if self._current_provider_id is None:
+            self._set_status("请先保存并选择供应商后再测试连接", is_error=True)
+            return False
+        try:
+            result = self._service.test_provider_connection(self._current_provider_id)
+            code = result.get("code", "")
+            message = result.get("message", "")
+            if code == "OK":
+                self._set_status(f"测试连接成功：{message}")
+                return True
+            self._set_status(f"测试连接失败：{code} - {message}", is_error=True)
+            return False
+        except ConfigValidationError as exc:
+            self._set_status(f"测试连接失败：{exc}", is_error=True)
+            return False
