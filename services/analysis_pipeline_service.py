@@ -129,8 +129,19 @@ class AnalysisPipelineService(BaseService):
         )
         self._worker = worker
         worker.signals.stage.connect(on_stage)
-        worker.signals.success.connect(on_success)
-        worker.signals.error.connect(on_error)
+
+        def _on_success(ocr_text: str, ai_content: str, raw_text: str) -> None:
+            """成功回调前先恢复可触发状态，避免竞态。"""
+            self._is_running = False
+            on_success(ocr_text, ai_content, raw_text)
+
+        def _on_error(code: str, message: str) -> None:
+            """失败回调前先恢复可触发状态，避免竞态。"""
+            self._is_running = False
+            on_error(code, message)
+
+        worker.signals.success.connect(_on_success)
+        worker.signals.error.connect(_on_error)
         worker.signals.finished.connect(self._on_worker_finished)
 
         self.logger.debug("解析任务已提交线程池")
