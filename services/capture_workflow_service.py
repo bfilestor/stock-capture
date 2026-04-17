@@ -10,7 +10,9 @@ from PySide6.QtWidgets import QDialog, QWidget
 from services.ai_service import AIService
 from services.analysis_pipeline_service import AnalysisPipelineService
 from services.config_service import ConfigService
+from services.errors import ServiceError
 from services.ocr_service import OCRService
+from services.result_service import ResultService
 from ui.capture.capture_overlay import CaptureOverlay
 from ui.capture.capture_preview_dialog import CapturePreviewDialog
 from ui.capture.capture_type_selector_dialog import CaptureTypeSelectorDialog
@@ -32,6 +34,7 @@ class CaptureWorkflowService:
         result_dialog_factory: Callable[[str, str, str, QWidget | None], QDialog] | None = None,
         on_parse_requested: Callable[[CaptureContext], None] | None = None,
         analysis_pipeline: AnalysisPipelineService | None = None,
+        result_service: ResultService | None = None,
     ) -> None:
         """初始化截图工作流服务。"""
         self._logger = get_logger(__name__)
@@ -59,6 +62,7 @@ class CaptureWorkflowService:
             ocr_service=OCRService(),
             ai_service=AIService(config_service),
         )
+        self._result_service = result_service or ResultService()
         self.context = CaptureContext()
         self._overlay: CaptureOverlay | None = None
         self._preview_dialog: QDialog | None = None
@@ -237,9 +241,24 @@ class CaptureWorkflowService:
         self._logger.debug("结果确认窗口已打开")
 
     def _on_result_save_requested(self, result_date: str, json_text: str) -> None:
-        """处理结果窗口的入库请求（E5-S2-I1 将接入数据库写入）。"""
-        self._logger.debug(
-            "收到入库请求，result_date=%s, json_len=%s", result_date, len(json_text)
-        )
-        if self._result_dialog is not None and hasattr(self._result_dialog, "set_status"):
-            self._result_dialog.set_status("入库功能将在后续 Issue 完整实现")  # type: ignore[attr-defined]
+        """处理结果窗口的入库请求。"""
+        self._logger.debug("收到入库请求，result_date=%s, json_len=%s", result_date, len(json_text))
+        try:
+            if self.context.capture_type_id is None:
+                raise ServiceError("JSON_001", "业务类型上下文缺失")
+            action = self._result_service.save_result(
+                result_date=result_date,
+                capture_type_id=self.context.capture_type_id,
+                image_path=self.context.image_path,
+                ocr_text=self.context.ocr_text,
+                ai_raw_response=self.context.ai_raw_response,
+                final_json_text=json_text,
+            )
+            self.context.state = "done"
+            if self._result_dialog is not None and hasattr(self._result_dialog, "set_status"):
+                message = "入库成功（新增）" if action == "inserted" else "入库成功（覆盖更新）"
+                self._result_dialog.set_status(message)  # type: ignore[attr-defined]
+        except ServiceError as exc:
+            self.context.state = "failed"
+            if self._result_dialog is not None and hasattr(self._result_dialog, "set_status"):
+                self._result_dialog.set_status(str(exc), is_error=True)  # type: ignore[attr-defined]

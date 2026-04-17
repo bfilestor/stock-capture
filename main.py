@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from db.database import DatabaseBootstrap
 from services.capture_workflow_service import CaptureWorkflowService
 from services.config_service import ConfigService
+from services.result_service import ResultService
 from ui.settings_window import SettingsWindow
 from utils.logging_config import get_logger, setup_logging
 from utils.app_paths import get_db_path
@@ -43,6 +44,7 @@ def bootstrap() -> QApplication:
     setattr(app, "_db_bootstrap", db_bootstrap)
 
     config_service = ConfigService(db_bootstrap.db_path)
+    result_service = ResultService(db_bootstrap.db_path)
     settings_window = SettingsWindow(config_service)
 
     def handle_parse_requested(context) -> None:
@@ -57,6 +59,7 @@ def bootstrap() -> QApplication:
     capture_workflow = CaptureWorkflowService(
         config_service,
         on_parse_requested=handle_parse_requested,
+        result_service=result_service,
     )
     setattr(app, "_settings_window", settings_window)
     setattr(app, "_capture_workflow", capture_workflow)
