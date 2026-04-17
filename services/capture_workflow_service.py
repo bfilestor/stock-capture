@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QDialog, QWidget
 
 from services.ai_service import AIService
@@ -36,11 +37,13 @@ class CaptureWorkflowService:
         on_parse_requested: Callable[[CaptureContext], None] | None = None,
         analysis_pipeline: AnalysisPipelineService | None = None,
         result_service: ResultService | None = None,
+        overlay_start_delay_ms: int = 0,
     ) -> None:
         """初始化截图工作流服务。"""
         self._logger = get_logger(__name__)
         self._config_service = config_service
         self._parent = parent
+        self._overlay_start_delay_ms = max(0, int(overlay_start_delay_ms))
         self._dialog_factory = dialog_factory or (
             lambda capture_types, parent: CaptureTypeSelectorDialog(capture_types, parent)
         )
@@ -68,6 +71,15 @@ class CaptureWorkflowService:
         self._overlay: CaptureOverlay | None = None
         self._preview_dialog: QDialog | None = None
         self._result_dialog: QDialog | None = None
+
+    def request_start_capture_overlay(self) -> None:
+        """按配置延时进入截图遮罩，兼容首次截图与重截场景。"""
+        if self._overlay_start_delay_ms <= 0:
+            self._logger.debug("立即进入截图遮罩，无延时")
+            self.start_capture_overlay()
+            return
+        self._logger.debug("将在 %s ms 后进入截图遮罩", self._overlay_start_delay_ms)
+        QTimer.singleShot(self._overlay_start_delay_ms, self.start_capture_overlay)
 
     def select_capture_type(self) -> tuple[bool, str]:
         """打开业务类型面板并写入上下文。"""
@@ -153,7 +165,7 @@ class CaptureWorkflowService:
         self._remove_temp_image()
         self.context.image_path = ""
         self.context.state = "capturing"
-        self.start_capture_overlay()
+        self.request_start_capture_overlay()
 
     def _on_send_requested(self, image_path: str) -> None:
         """处理发送解析入口。"""

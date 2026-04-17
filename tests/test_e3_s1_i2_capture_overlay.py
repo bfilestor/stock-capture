@@ -60,6 +60,38 @@ def test_bt_e3_s1_i2_01_极小选区被拦截(app: QApplication) -> None:
     assert "选区过小" in message
 
 
+def test_bt_e3_s1_i2_02_遮罩默认完全透明(app: QApplication) -> None:
+    """边界测试：截图遮罩默认透明，避免遮挡底层内容。"""
+    overlay = CaptureOverlay()
+    assert overlay.current_mask_alpha() == 0
+
+
+def test_bt_e3_s1_i2_03_未传source时优先使用缓存快照(
+    app: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """边界测试：未传 source_image 时应优先从缓存快照裁剪。"""
+    overlay = CaptureOverlay(min_selection_size=8)
+    snapshot = QImage(200, 120, QImage.Format_ARGB32)
+    snapshot.fill(0xFF123456)
+    overlay._screen_image = snapshot  # type: ignore[attr-defined]
+
+    captured: dict[str, QImage] = {}
+
+    def fake_save_selection_image(image: QImage) -> str:
+        captured["image"] = image
+        return "runtime/captures/fake.png"
+
+    monkeypatch.setattr(overlay, "_save_selection_image", fake_save_selection_image)
+
+    success, payload = overlay.complete_selection(QRect(10, 8, 60, 40), source_image=None)
+    assert success is True
+    assert payload.endswith(".png")
+    assert "image" in captured
+    assert captured["image"].width() == 60
+    assert captured["image"].height() == 40
+
+
 def test_esc_cancel_restores_idle_state(config_service: ConfigService) -> None:
     """Esc取消时，工作流状态恢复到 idle。"""
     config_service.create_capture_type(

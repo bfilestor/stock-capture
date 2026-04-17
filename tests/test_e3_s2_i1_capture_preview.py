@@ -176,3 +176,76 @@ def test_bt_e3_s2_i1_01_预览图文件缺失提示重截(app: QApplication, tmp
 
     assert dialog.send_button.isEnabled() is False
     assert "截图失效" in dialog.status_label.text()
+
+
+def test_bt_e3_s2_i1_02_重截遵循延时启动(
+    config_service: ConfigService,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """边界测试：重截请求应复用截图延时策略，避免预览框被截入快照。"""
+    config_service.create_capture_type(
+        CaptureTypePayload(name="市场总览", prompt_template="模板", is_enabled=True)
+    )
+
+    class FakeDialog:
+        """业务类型选择框替身。"""
+
+        def __init__(self, capture_types: list[dict], _parent: object | None) -> None:
+            self.selected_capture_type = capture_types[0]
+
+        def exec(self) -> int:
+            return QDialog.Accepted
+
+    class FakeOverlay(QObject):
+        """截图遮罩替身。"""
+
+        capture_completed = Signal(str)
+        capture_cancelled = Signal()
+        capture_error = Signal(str)
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.show_count = 0
+
+        def showFullScreen(self) -> None:
+            self.show_count += 1
+
+        def activateWindow(self) -> None:
+            pass
+
+    overlay_instances: list[FakeOverlay] = []
+
+    def overlay_factory(_parent: object | None) -> FakeOverlay:
+        overlay = FakeOverlay()
+        overlay_instances.append(overlay)
+        return overlay
+
+    delay_record: dict[str, int] = {}
+
+    def fake_single_shot(delay: int, callback) -> None:
+        delay_record["value"] = delay
+        callback()
+
+    monkeypatch.setattr("services.capture_workflow_service.QTimer.singleShot", fake_single_shot)
+
+    workflow = CaptureWorkflowService(
+        config_service,
+        dialog_factory=FakeDialog,
+        overlay_factory=overlay_factory,  # type: ignore[arg-type]
+        overlay_start_delay_ms=260,
+    )
+    selected, _ = workflow.select_capture_type()
+    assert selected is True
+
+    old_image = Path(_create_image_file(tmp_path / "retake_old.png"))
+    workflow.context.image_path = str(old_image)
+    workflow.context.state = "previewing"
+
+    workflow._on_retake_requested()
+
+    assert delay_record["value"] == 260
+    assert workflow.context.state == "capturing"
+    assert len(overlay_instances) == 1
+    assert overlay_instances[0].show_count == 1
+    assert old_image.exists() is False

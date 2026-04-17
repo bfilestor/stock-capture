@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
 def get_project_root() -> Path:
     """返回项目根目录。"""
+    if bool(getattr(sys, "frozen", False)):
+        # 打包后优先使用 exe 所在目录，避免路径落在临时解压目录。
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent
 
 
@@ -32,6 +36,9 @@ def get_db_path() -> Path:
     custom_path = os.getenv("STOCK_CAPTURE_DB_PATH")
     if custom_path:
         return Path(custom_path)
+    if bool(getattr(sys, "frozen", False)):
+        # 打包运行时默认将数据库放在 exe 同目录，便于整包迁移。
+        return Path(sys.executable).resolve().parent / "stock_capture.db"
     return get_data_dir() / "stock_capture.db"
 
 

@@ -20,25 +20,58 @@ class CaptureOverlay(QWidget):
     capture_cancelled = Signal()
     capture_error = Signal(str)
 
-    def __init__(self, min_selection_size: int = 8, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        min_selection_size: int = 8,
+        parent: QWidget | None = None,
+        mask_alpha: int = 0,
+    ) -> None:
         """初始化截图遮罩层。"""
         super().__init__(parent)
         self._logger = get_logger(__name__)
         self._min_selection_size = min_selection_size
+        self._mask_alpha = max(0, min(255, int(mask_alpha)))
         self._start_point: QPoint | None = None
         self._end_point: QPoint | None = None
+        self._screen_image: QImage | None = None
 
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setWindowState(Qt.WindowFullScreen)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         self.setMouseTracking(True)
-        self._logger.debug("CaptureOverlay 初始化完成")
+        self._capture_screen_snapshot()
+        self._logger.debug("CaptureOverlay 初始化完成，mask_alpha=%s", self._mask_alpha)
 
     def current_rect(self) -> QRect:
         """返回当前选区矩形。"""
         if self._start_point is None or self._end_point is None:
             return QRect()
         return QRect(self._start_point, self._end_point).normalized()
+
+    def current_mask_alpha(self) -> int:
+        """返回当前遮罩透明度，便于调试与测试校验。"""
+        return self._mask_alpha
+
+    def _capture_screen_snapshot(self) -> None:
+        """抓取当前屏幕快照，避免遮罩窗口导致底层内容不可见。"""
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self._logger.warning("截图初始化失败：未检测到可用屏幕，无法生成快照背景")
+            return
+        geometry = screen.geometry()
+        pixmap = screen.grabWindow(0, geometry.x(), geometry.y(), geometry.width(), geometry.height())
+        image = pixmap.toImage()
+        if image.isNull():
+            self._logger.warning("截图初始化失败：屏幕快照为空，将回退到实时抓屏")
+            return
+        self._screen_image = image
+        self._logger.debug(
+            "已缓存屏幕快照，geometry=(%s,%s,%s,%s)",
+            geometry.x(),
+            geometry.y(),
+            geometry.width(),
+            geometry.height(),
+        )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         """按下鼠标开始选区。"""
@@ -87,7 +120,12 @@ class CaptureOverlay(QWidget):
     def paintEvent(self, _event) -> None:
         """绘制遮罩与选区边框。"""
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 80))
+        # 优先绘制屏幕快照，避免某些系统下透明窗口显示为黑屏。
+        if self._screen_image is not None and not self._screen_image.isNull():
+            painter.drawImage(self.rect(), self._screen_image)
+        # 遮罩默认透明；若外部传入 alpha，可叠加轻度暗层。
+        if self._mask_alpha > 0:
+            painter.fillRect(self.rect(), QColor(0, 0, 0, self._mask_alpha))
 
         rect = self.current_rect()
         if rect.isNull():
@@ -124,11 +162,17 @@ class CaptureOverlay(QWidget):
 
         try:
             if source_image is not None:
+                self._logger.debug("complete_selection 使用传入 source_image 裁剪，selection=%s", selection)
                 target_image = source_image.copy(selection)
+            elif self._screen_image is not None and not self._screen_image.isNull():
+                # 运行时优先从缓存快照裁剪，确保不受遮罩层影响。
+                self._logger.debug("complete_selection 使用缓存屏幕快照裁剪，selection=%s", selection)
+                target_image = self._screen_image.copy(selection)
             else:
                 screen = QGuiApplication.primaryScreen()
                 if screen is None:
                     return False, "未检测到可用屏幕"
+                self._logger.debug("complete_selection 回退实时抓屏，selection=%s", selection)
                 pixmap = screen.grabWindow(
                     0, selection.x(), selection.y(), selection.width(), selection.height()
                 )
@@ -138,4 +182,3 @@ class CaptureOverlay(QWidget):
         except Exception as exc:
             self._logger.exception("保存截图异常")
             return False, f"截图保存失败: {exc}"
-

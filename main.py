@@ -37,6 +37,7 @@ def bootstrap() -> QApplication:
     logger.debug("bootstrap 开始执行，日志文件路径: %s", log_file)
 
     app = create_application()
+    overlay_delay_ms = max(0, int(os.getenv("STOCK_CAPTURE_OVERLAY_DELAY_MS", "300") or "300"))
 
     # 启动时自动建库，保障后续配置与结果可持久化。
     db_bootstrap = DatabaseBootstrap(get_db_path())
@@ -60,6 +61,7 @@ def bootstrap() -> QApplication:
         config_service,
         on_parse_requested=handle_parse_requested,
         result_service=result_service,
+        overlay_start_delay_ms=overlay_delay_ms,
     )
     setattr(app, "_settings_window", settings_window)
     setattr(app, "_capture_workflow", capture_workflow)
@@ -80,7 +82,8 @@ def bootstrap() -> QApplication:
                 capture_workflow.context.capture_type_id,
                 capture_workflow.context.capture_type_name,
             )
-            capture_workflow.start_capture_overlay()
+            # 首次截图与重截共用同一延时策略，避免弹窗残影进入快照。
+            capture_workflow.request_start_capture_overlay()
         else:
             logger.warning("截图入口未继续：%s", message)
 
