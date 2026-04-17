@@ -12,4 +12,7 @@ class CaptureContext:
     capture_type_id: int | None = None
     capture_type_name: str = ""
     image_path: str = ""
+    ocr_text: str = ""
+    ai_raw_response: str = ""
+    ai_content: str = ""
     state: str = "idle"

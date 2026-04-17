@@ -57,6 +57,18 @@ class CaptureTypeDAO(BaseDAO):
             rows = connection.execute(sql).fetchall()
             return [dict(row) for row in rows]
 
+    def get_by_id(self, capture_type_id: int) -> dict[str, Any] | None:
+        """按ID查询业务类型。"""
+        sql = """
+        SELECT id, name, description, prompt_template, is_enabled, created_at, updated_at
+        FROM capture_types
+        WHERE id = ?
+        """
+        with self.transaction() as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(sql, (capture_type_id,)).fetchone()
+            return dict(row) if row else None
+
     def create(
         self,
         *,

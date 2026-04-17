@@ -107,6 +107,26 @@ class CapturePreviewDialog(QDialog):
 
     def _on_send_clicked(self) -> None:
         """处理发送解析动作。"""
+        if not self.send_button.isEnabled():
+            self._set_status("解析进行中，请勿重复点击", is_error=True)
+            return
         self._logger.debug("点击发送解析，image_path=%s", self._image_path)
         self.send_requested.emit(self._image_path)
 
+    def show_stage(self, stage_text: str) -> None:
+        """显示处理中阶段并禁用发送按钮。"""
+        self.send_button.setEnabled(False)
+        self.retake_button.setEnabled(False)
+        self._set_status(f"{stage_text}...")
+
+    def allow_retry(self, message: str) -> None:
+        """失败后恢复可重试状态。"""
+        self.send_button.setEnabled(True)
+        self.retake_button.setEnabled(True)
+        self._set_status(message, is_error=True)
+
+    def mark_send_complete(self, message: str) -> None:
+        """发送流程完成后的状态更新。"""
+        self.send_button.setEnabled(True)
+        self.retake_button.setEnabled(True)
+        self._set_status(message)

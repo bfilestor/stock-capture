@@ -7,7 +7,10 @@ from typing import Callable
 
 from PySide6.QtWidgets import QDialog, QWidget
 
+from services.ai_service import AIService
+from services.analysis_pipeline_service import AnalysisPipelineService
 from services.config_service import ConfigService
+from services.ocr_service import OCRService
 from ui.capture.capture_overlay import CaptureOverlay
 from ui.capture.capture_preview_dialog import CapturePreviewDialog
 from ui.capture.capture_type_selector_dialog import CaptureTypeSelectorDialog
@@ -26,6 +29,7 @@ class CaptureWorkflowService:
         overlay_factory: Callable[[QWidget | None], CaptureOverlay] | None = None,
         preview_factory: Callable[[str, str, QWidget | None], QDialog] | None = None,
         on_parse_requested: Callable[[CaptureContext], None] | None = None,
+        analysis_pipeline: AnalysisPipelineService | None = None,
     ) -> None:
         """初始化截图工作流服务。"""
         self._logger = get_logger(__name__)
@@ -41,6 +45,10 @@ class CaptureWorkflowService:
             )
         )
         self._on_parse_requested = on_parse_requested
+        self._analysis_pipeline = analysis_pipeline or AnalysisPipelineService(
+            ocr_service=OCRService(),
+            ai_service=AIService(config_service),
+        )
         self.context = CaptureContext()
         self._overlay: CaptureOverlay | None = None
         self._preview_dialog: QDialog | None = None
@@ -133,12 +141,71 @@ class CaptureWorkflowService:
 
     def _on_send_requested(self, image_path: str) -> None:
         """处理发送解析入口。"""
+        if self.context.capture_type_id is None:
+            self._logger.warning("发送解析失败：capture_type_id 为空")
+            return
+        if self._analysis_pipeline.is_running():
+            self._show_preview_retry("解析进行中，请勿重复点击发送解析")
+            return
+
+        capture_type = self._config_service.get_capture_type(self.context.capture_type_id)
+        prompt = str(capture_type.get("prompt_template", "")).strip()
+        if not prompt:
+            self._show_preview_retry("当前业务类型未配置 PromptTemplate")
+            return
+
         self.context.image_path = image_path
         self.context.state = "ocr_processing"
-        self._logger.debug(
-            "发送解析入口触发，capture_type_id=%s, image_path=%s",
-            self.context.capture_type_id,
-            image_path,
+        self._show_preview_stage("OCR识别中")
+
+        started = self._analysis_pipeline.start_analysis(
+            image_path=image_path,
+            prompt=prompt,
+            on_stage=self._on_pipeline_stage,
+            on_success=self._on_pipeline_success,
+            on_error=self._on_pipeline_error,
         )
+        if not started:
+            self._show_preview_retry("解析进行中，请勿重复点击发送解析")
+
+    def _on_pipeline_stage(self, stage_text: str) -> None:
+        """处理异步阶段更新。"""
+        if stage_text == "OCR识别中":
+            self.context.state = "ocr_processing"
+        elif stage_text == "AI分析中":
+            self.context.state = "ai_processing"
+        self._show_preview_stage(stage_text)
+
+    def _on_pipeline_success(self, ocr_text: str, ai_content: str, ai_raw_text: str) -> None:
+        """处理解析成功。"""
+        self.context.ocr_text = ocr_text
+        self.context.ai_content = ai_content
+        self.context.ai_raw_response = ai_raw_text
+        self.context.state = "editing"
+        self._show_preview_complete("解析完成，准备进入结果确认")
         if self._on_parse_requested is not None:
             self._on_parse_requested(self.context)
+
+    def _on_pipeline_error(self, code: str, message: str) -> None:
+        """处理解析失败。"""
+        self.context.state = "failed"
+        self._show_preview_retry(f"解析失败：{code} - {message}")
+
+    def _show_preview_stage(self, stage: str) -> None:
+        """更新预览窗口阶段提示。"""
+        if self._preview_dialog is not None and hasattr(self._preview_dialog, "show_stage"):
+            self._preview_dialog.show_stage(stage)  # type: ignore[attr-defined]
+
+    def _show_preview_retry(self, message: str) -> None:
+        """更新预览窗口为可重试状态。"""
+        if self._preview_dialog is not None and hasattr(self._preview_dialog, "allow_retry"):
+            self._preview_dialog.allow_retry(message)  # type: ignore[attr-defined]
+        else:
+            self._logger.warning(message)
+
+    def _show_preview_complete(self, message: str) -> None:
+        """更新预览窗口完成提示。"""
+        if self._preview_dialog is not None and hasattr(self._preview_dialog, "mark_send_complete"):
+            self._preview_dialog.mark_send_complete(message)  # type: ignore[attr-defined]
+        else:
+            self._logger.debug(message)

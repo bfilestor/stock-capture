@@ -95,6 +95,30 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
     overlay_instances: list[FakeOverlay] = []
     parse_records: list[tuple[int | None, str, str]] = []
 
+    class FakePipeline:
+        """异步管线替身。"""
+
+        def __init__(self) -> None:
+            self.running = False
+
+        def is_running(self) -> bool:
+            return self.running
+
+        def start_analysis(
+            self,
+            image_path: str,
+            prompt: str,
+            on_stage,
+            on_success,
+            on_error,
+        ) -> bool:
+            self.running = True
+            on_stage("OCR识别中")
+            on_stage("AI分析中")
+            on_success("ocr文本", '{"ok":true}', '{"choices":[{"message":{"content":"{\\"ok\\":true}"}}]}')
+            self.running = False
+            return True
+
     def preview_factory(image_path: str, capture_type_name: str, parent: object | None) -> QDialog:
         preview = FakePreview(image_path, capture_type_name, parent)
         preview_instances.append(preview)
@@ -114,6 +138,7 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
         overlay_factory=overlay_factory,  # type: ignore[arg-type]
         preview_factory=preview_factory,
         on_parse_requested=on_parse_requested,
+        analysis_pipeline=FakePipeline(),  # type: ignore[arg-type]
     )
     success, _ = workflow.select_capture_type()
     assert success is True
@@ -138,7 +163,7 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
     assert len(preview_instances) == 2
     preview_instances[-1].send_requested.emit(image2)
 
-    assert workflow.context.state == "ocr_processing"
+    assert workflow.context.state == "editing"
     assert parse_records[-1][0] is not None
     assert parse_records[-1][1] == "市场动态"
     assert parse_records[-1][2] == image2

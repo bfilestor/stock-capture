@@ -80,6 +80,13 @@ class ConfigService(BaseService):
         """查询启用中的业务类型。"""
         return self._capture_type_dao.list_enabled()
 
+    def get_capture_type(self, capture_type_id: int) -> dict[str, Any]:
+        """按ID查询业务类型。"""
+        row = self._capture_type_dao.get_by_id(capture_type_id)
+        if row is None:
+            raise ConfigValidationError(f"业务类型不存在: {capture_type_id}")
+        return row
+
     def create_capture_type(self, payload: CaptureTypePayload) -> int:
         """创建业务类型。"""
         self._validate_capture_type(payload)
