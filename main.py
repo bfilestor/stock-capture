@@ -9,7 +9,9 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
+from db.database import DatabaseBootstrap
 from utils.logging_config import get_logger, setup_logging
+from utils.app_paths import get_db_path
 from tray.tray_manager import TrayManager
 
 
@@ -31,6 +33,11 @@ def bootstrap() -> QApplication:
     logger.debug("bootstrap 开始执行，日志文件路径: %s", log_file)
 
     app = create_application()
+
+    # 启动时自动建库，保障后续配置与结果可持久化。
+    db_bootstrap = DatabaseBootstrap(get_db_path())
+    db_bootstrap.initialize()
+    setattr(app, "_db_bootstrap", db_bootstrap)
 
     # 创建托盘管理器并绑定默认动作，具体业务窗口在后续 Issue 落地。
     tray_manager = TrayManager(app)

@@ -201,6 +201,11 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# stock-capture runtime artifacts
+runtime/
+tests/tmp_logs/
+tests/tmp_runtime/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
