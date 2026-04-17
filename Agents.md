@@ -4,5 +4,5 @@
 - 开发代码必须用中文注释，说明函数功能
 - 加入充分的debug日志，便于后续查找问题
 # 开发步骤
-开始开发前阅读`产品功能开发说明书.md`和`产品需求说明书.md`总结并理解产品需求，然后从`doc\status\todo-list.md`文件中查找未开发的issue，逐个issue开始开发，开发完成一个issue，提交git，再开始开发下一个issue，直到todo-list中全部issue开发完成。
+开始开发前阅读`doc/产品功能开发说明书.md`和`doc/产品需求说明书.md`总结并理解产品需求，然后从`doc/status/todo-list.md`文件中查找未开发的issue，逐个issue开始开发，开发完成一个issue，提交git，再开始开发下一个issue，直到todo-list中全部issue开发完成。
 
