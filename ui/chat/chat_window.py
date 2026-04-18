@@ -219,6 +219,25 @@ class ChatWindow(QWidget):
         self.history_scroll_layout.addStretch(1)
         self._logger.debug("历史记录刷新完成，count=%s", len(records))
 
+    def _set_history_item_expanded(self, target_index: int, expanded: bool) -> None:
+        """设置历史详情展开状态；展开时自动收起其他项。"""
+        for index, detail_label in enumerate(self._history_detail_labels):
+            if expanded:
+                is_expanded = index == target_index
+            else:
+                # 收起仅影响当前项，其他项保持原状态。
+                is_expanded = (not detail_label.isHidden()) if index != target_index else False
+
+            detail_label.setVisible(is_expanded)
+            toggle_button = self._history_detail_toggle_buttons[index]
+            toggle_button.setText("收起" if is_expanded else "展开")
+
+        self._logger.debug(
+            "历史记录展开状态已更新，target_index=%s, expanded=%s",
+            target_index,
+            expanded,
+        )
+
     def _build_history_item(self, record: dict[str, Any], expanded: bool) -> QWidget:
         """构建单条历史记录卡片。"""
         container = QWidget(self.history_scroll_content)
@@ -254,6 +273,7 @@ class ChatWindow(QWidget):
         detail_label.setStyleSheet("color:#263238; background:#ECEFF1; border-radius:4px; padding:6px;")
         layout.addWidget(detail_label)
         self._history_detail_labels.append(detail_label)
+        detail_index = len(self._history_detail_labels) - 1
 
         import_button = QPushButton("引入", container)
         import_button.clicked.connect(
@@ -262,19 +282,12 @@ class ChatWindow(QWidget):
         layout.addWidget(import_button, 0, Qt.AlignRight)
         self._history_import_buttons.append(import_button)
 
-        def _set_expanded_state(is_expanded: bool) -> None:
-            """设置单条历史记录展开/收起状态。"""
-            detail_label.setVisible(is_expanded)
-            detail_toggle_button.setText("收起" if is_expanded else "展开")
-            self._logger.debug(
-                "历史记录卡片状态更新，capture_type=%s, result_date=%s, expanded=%s",
-                record.get("capture_type_name", ""),
-                record.get("result_date", ""),
-                is_expanded,
+        detail_toggle_button.clicked.connect(
+            lambda _checked=False, index=detail_index, label=detail_label: self._set_history_item_expanded(
+                index, label.isHidden()
             )
-
-        detail_toggle_button.clicked.connect(lambda _checked=False: _set_expanded_state(detail_label.isHidden()))
-        _set_expanded_state(expanded)
+        )
+        self._set_history_item_expanded(detail_index, expanded)
         return container
 
     def _import_history_text(self, text: str) -> None:

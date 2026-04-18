@@ -68,9 +68,9 @@ def test_ft_e8_s2_i1_01_历史记录可加载并引入输入框(
     assert dialog.history_record_count() == 2
     assert dialog.history_item_expanded_states() == [True, False]
     dialog.history_item_toggle_buttons()[1].click()
-    assert dialog.history_item_expanded_states() == [True, True]
-    dialog.history_item_toggle_buttons()[0].click()
     assert dialog.history_item_expanded_states() == [False, True]
+    dialog.history_item_toggle_buttons()[0].click()
+    assert dialog.history_item_expanded_states() == [True, False]
 
     first_import_button = dialog.history_import_buttons()[0]
     first_import_button.click()
