@@ -36,6 +36,7 @@ class ChatWindow(QWidget):
         self._chat_pipeline = chat_pipeline
         self._history_import_buttons: list[QPushButton] = []
         self._history_detail_toggle_buttons: list[QPushButton] = []
+        self._history_summary_labels: list[QLabel] = []
         self._history_detail_labels: list[QLabel] = []
         self._chat_messages: list[dict[str, str]] = []
         self._chat_bubbles: list[ChatMessageBubble] = []
@@ -166,6 +167,10 @@ class ChatWindow(QWidget):
 
     def history_item_preview_texts(self) -> list[str]:
         """返回历史记录预览文本列表（测试辅助）。"""
+        return [label.text() for label in self._history_summary_labels]
+
+    def history_item_detail_texts(self) -> list[str]:
+        """返回历史记录详情文本列表（测试辅助）。"""
         return [label.text() for label in self._history_detail_labels]
 
     @staticmethod
@@ -180,6 +185,7 @@ class ChatWindow(QWidget):
         """清空历史记录列表组件。"""
         self._history_import_buttons.clear()
         self._history_detail_toggle_buttons.clear()
+        self._history_summary_labels.clear()
         self._history_detail_labels.clear()
         while self.history_scroll_layout.count() > 0:
             item = self.history_scroll_layout.takeAt(0)
@@ -240,14 +246,12 @@ class ChatWindow(QWidget):
         summary.setStyleSheet("color:#455A64;")
         summary.setFixedHeight(summary_metrics.height() + 6)
         layout.addWidget(summary)
+        self._history_summary_labels.append(summary)
 
         detail_label = QLabel(str(record.get("final_json_text", "")), container)
-        detail_metrics = QFontMetrics(detail_label.font())
-        detail_label.setWordWrap(False)
-        detail_label.setText(self._to_single_line_preview(str(record.get("final_json_text", "")), detail_metrics))
+        detail_label.setWordWrap(True)
         detail_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        detail_label.setStyleSheet("color:#263238; background:#ECEFF1; border-radius:4px; padding:4px 6px;")
-        detail_label.setFixedHeight(detail_metrics.height() + 10)
+        detail_label.setStyleSheet("color:#263238; background:#ECEFF1; border-radius:4px; padding:6px;")
         layout.addWidget(detail_label)
         self._history_detail_labels.append(detail_label)
 

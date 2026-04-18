@@ -140,6 +140,9 @@ def test_bt_e8_s2_i1_02_历史内容预览压缩为单行(app: QApplication, tmp
     dialog = ChatWindow(history_service=AnalysisHistoryService(db_path))
     dialog.toggle_history_button.click()
     preview_text = dialog.history_item_preview_texts()[0]
+    detail_text = dialog.history_item_detail_texts()[0]
 
     assert "\n" not in preview_text
     assert len(preview_text) < len(" ".join(long_json.splitlines()))
+    assert detail_text == long_json
+    assert "\n" in detail_text
