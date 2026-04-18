@@ -15,6 +15,7 @@ SCHEMA_SQL: tuple[str, ...] = (
       name TEXT UNIQUE,
       description TEXT,
       prompt_template TEXT,
+      system_prompt TEXT,
       is_enabled INTEGER,
       created_at TEXT,
       updated_at TEXT
@@ -54,6 +55,14 @@ SCHEMA_SQL: tuple[str, ...] = (
       UNIQUE(result_date, capture_type_id)
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id INTEGER PRIMARY KEY,
+      setting_key TEXT UNIQUE,
+      setting_value TEXT,
+      updated_at TEXT
+    );
+    """,
 )
 
 
@@ -83,6 +92,20 @@ class DatabaseBootstrap:
         connection.execute("PRAGMA foreign_keys = ON;")
         return connection
 
+    @staticmethod
+    def _has_column(connection: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+        """判断指定表是否存在目标字段。"""
+        rows = connection.execute(f"PRAGMA table_info({table_name});").fetchall()
+        columns = {str(row[1]) for row in rows}
+        return column_name in columns
+
+    def _apply_migrations(self, connection: sqlite3.Connection) -> None:
+        """执行轻量级兼容迁移，确保旧库具备新字段。"""
+        if not self._has_column(connection, "capture_types", "system_prompt"):
+            self._logger.debug("检测到旧版 capture_types，开始补齐 system_prompt 字段")
+            connection.execute("ALTER TABLE capture_types ADD COLUMN system_prompt TEXT;")
+            self._logger.info("已完成 capture_types.system_prompt 字段迁移")
+
     def initialize_schema(self, statements: Sequence[str] = SCHEMA_SQL) -> None:
         """执行建表语句。"""
         self._ensure_parent_dir()
@@ -91,6 +114,7 @@ class DatabaseBootstrap:
                 first_line = sql.strip().splitlines()[0]
                 self._logger.debug("执行建表语句: %s", first_line)
                 connection.execute(sql)
+            self._apply_migrations(connection)
             connection.commit()
         self._logger.debug("数据库结构初始化完成")
 

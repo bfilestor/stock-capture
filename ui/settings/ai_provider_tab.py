@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QVBoxLayout,
@@ -75,13 +76,23 @@ class AIProviderTab(QWidget):
         provider_form.addRow("", self.provider_default_checkbox)
         provider_layout.addLayout(provider_form)
 
+        self.global_system_prompt_edit = QPlainTextEdit(self)
+        self.global_system_prompt_edit.setPlaceholderText(
+            "请输入全局 SystemPrompt（业务类型未配置时生效）"
+        )
+        self.global_system_prompt_edit.setMinimumHeight(90)
+        provider_layout.addWidget(QLabel("全局 SystemPrompt", self))
+        provider_layout.addWidget(self.global_system_prompt_edit)
+
         provider_button_layout = QHBoxLayout()
         self.provider_new_button = QPushButton("新增供应商", self)
         self.provider_save_button = QPushButton("保存供应商", self)
         self.provider_delete_button = QPushButton("删除供应商", self)
+        self.save_global_prompt_button = QPushButton("保存全局Prompt", self)
         provider_button_layout.addWidget(self.provider_new_button)
         provider_button_layout.addWidget(self.provider_save_button)
         provider_button_layout.addWidget(self.provider_delete_button)
+        provider_button_layout.addWidget(self.save_global_prompt_button)
         provider_button_layout.addWidget(self.provider_key_toggle_button)
         provider_button_layout.addWidget(self.provider_test_button)
         provider_layout.addLayout(provider_button_layout)
@@ -131,12 +142,37 @@ class AIProviderTab(QWidget):
         self.provider_new_button.clicked.connect(self.new_provider)
         self.provider_save_button.clicked.connect(self.save_provider)
         self.provider_delete_button.clicked.connect(self.delete_provider)
+        self.save_global_prompt_button.clicked.connect(self.save_global_system_prompt)
         self.provider_key_toggle_button.clicked.connect(self.toggle_key_visibility)
         self.provider_test_button.clicked.connect(self.test_connection)
         self.model_new_button.clicked.connect(self.new_model)
         self.model_save_button.clicked.connect(self.save_model)
         self.model_delete_button.clicked.connect(self.delete_model)
         self.model_set_default_button.clicked.connect(self.set_model_default)
+        self.load_global_system_prompt()
+
+    def load_global_system_prompt(self) -> None:
+        """加载全局 SystemPrompt 到输入框。"""
+        try:
+            value = self._service.get_global_system_prompt()
+            self.global_system_prompt_edit.setPlainText(value)
+            self._logger.debug("加载全局SystemPrompt完成，length=%s", len(value))
+        except Exception:  # pragma: no cover - 防御性兜底
+            self._logger.exception("加载全局SystemPrompt失败")
+            self.global_system_prompt_edit.clear()
+
+    def save_global_system_prompt(self) -> bool:
+        """保存全局 SystemPrompt。"""
+        try:
+            value = self.global_system_prompt_edit.toPlainText()
+            self._service.save_global_system_prompt(value)
+            self.load_global_system_prompt()
+            self._set_status("全局 SystemPrompt 保存成功")
+            return True
+        except Exception as exc:  # pragma: no cover - 防御性兜底
+            self._logger.exception("保存全局SystemPrompt失败")
+            self._set_status(f"保存全局Prompt失败：{exc}", is_error=True)
+            return False
 
     def _provider_text(self, row: dict[str, Any]) -> str:
         """生成供应商列表文本。"""

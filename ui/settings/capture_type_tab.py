@@ -55,6 +55,8 @@ class CaptureTypeTab(QWidget):
         self.description_edit = QPlainTextEdit(self)
         self.prompt_edit = QPlainTextEdit(self)
         self.prompt_edit.setPlaceholderText("请输入 PromptTemplate（支持多行）")
+        self.system_prompt_edit = QPlainTextEdit(self)
+        self.system_prompt_edit.setPlaceholderText("可选：请输入该业务类型 SystemPrompt（留空时使用全局SystemPrompt）")
         self.enabled_checkbox = QCheckBox("启用", self)
         self.enabled_checkbox.setChecked(True)
 
@@ -62,6 +64,7 @@ class CaptureTypeTab(QWidget):
         form.addRow("业务类型名称*", self.name_edit)
         form.addRow("描述", self.description_edit)
         form.addRow("PromptTemplate*", self.prompt_edit)
+        form.addRow("SystemPrompt", self.system_prompt_edit)
         form.addRow("状态", self.enabled_checkbox)
         form_layout.addLayout(form)
 
@@ -122,6 +125,7 @@ class CaptureTypeTab(QWidget):
             name=self.name_edit.text(),
             description=self.description_edit.toPlainText(),
             prompt_template=self.prompt_edit.toPlainText(),
+            system_prompt=self.system_prompt_edit.toPlainText(),
             is_enabled=self.enabled_checkbox.isChecked(),
         )
 
@@ -131,6 +135,7 @@ class CaptureTypeTab(QWidget):
         self.name_edit.setText(str(record.get("name", "")))
         self.description_edit.setPlainText(str(record.get("description", "")))
         self.prompt_edit.setPlainText(str(record.get("prompt_template", "")))
+        self.system_prompt_edit.setPlainText(str(record.get("system_prompt", "")))
         self.enabled_checkbox.setChecked(int(record.get("is_enabled", 0)) == 1)
 
     def _on_item_selected(self) -> None:
@@ -149,6 +154,7 @@ class CaptureTypeTab(QWidget):
         self.name_edit.clear()
         self.description_edit.clear()
         self.prompt_edit.clear()
+        self.system_prompt_edit.clear()
         self.enabled_checkbox.setChecked(True)
         self.list_widget.clearSelection()
         self._set_status("已切换到新增模式")

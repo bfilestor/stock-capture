@@ -11,8 +11,13 @@ from urllib.parse import urlparse
 
 import httpx
 from db.ai_provider_dao import AIModelDAO, AIProviderDAO
+from db.app_settings_dao import AppSettingsDAO
 from db.capture_type_dao import CaptureTypeDAO
 from services.base_service import BaseService
+
+DEFAULT_ANALYSIS_SYSTEM_PROMPT = "只返回JSON"
+DEFAULT_CHAT_SYSTEM_PROMPT = "你是A股复盘助手，请基于用户输入给出清晰、可执行的分析建议。"
+GLOBAL_SYSTEM_PROMPT_KEY = "global_system_prompt"
 
 
 class ConfigValidationError(ValueError):
@@ -26,6 +31,7 @@ class CaptureTypePayload:
     name: str
     prompt_template: str
     description: str = ""
+    system_prompt: str = ""
     is_enabled: bool = True
 
 
@@ -59,6 +65,7 @@ class ConfigService(BaseService):
         self._capture_type_dao = CaptureTypeDAO(db_path)
         self._provider_dao = AIProviderDAO(db_path)
         self._model_dao = AIModelDAO(db_path)
+        self._app_settings_dao = AppSettingsDAO(db_path)
 
     @staticmethod
     def _now_text() -> str:
@@ -71,6 +78,11 @@ class ConfigService(BaseService):
             raise ConfigValidationError("业务类型名称不能为空")
         if not payload.prompt_template.strip():
             raise ConfigValidationError("PromptTemplate 不能为空")
+
+    @staticmethod
+    def _normalize_system_prompt(text: str) -> str:
+        """规范化 SystemPrompt 文本。"""
+        return text.strip()
 
     def list_capture_types(self) -> list[dict[str, Any]]:
         """查询全部业务类型。"""
@@ -96,6 +108,7 @@ class ConfigService(BaseService):
                 name=payload.name.strip(),
                 description=payload.description.strip(),
                 prompt_template=payload.prompt_template.strip(),
+                system_prompt=self._normalize_system_prompt(payload.system_prompt),
                 is_enabled=1 if payload.is_enabled else 0,
                 created_at=now_text,
                 updated_at=now_text,
@@ -113,6 +126,7 @@ class ConfigService(BaseService):
                 name=payload.name.strip(),
                 description=payload.description.strip(),
                 prompt_template=payload.prompt_template.strip(),
+                system_prompt=self._normalize_system_prompt(payload.system_prompt),
                 is_enabled=1 if payload.is_enabled else 0,
                 updated_at=self._now_text(),
             )
@@ -125,6 +139,53 @@ class ConfigService(BaseService):
         """删除业务类型。"""
         row_count = self._capture_type_dao.delete(capture_type_id)
         self.logger.debug("删除业务类型完成，id=%s，影响行数=%s", capture_type_id, row_count)
+
+    def save_global_system_prompt(self, system_prompt: str) -> None:
+        """保存全局 SystemPrompt。"""
+        normalized = self._normalize_system_prompt(system_prompt)
+        self._app_settings_dao.upsert(
+            setting_key=GLOBAL_SYSTEM_PROMPT_KEY,
+            setting_value=normalized,
+            updated_at=self._now_text(),
+        )
+        self.logger.debug("全局SystemPrompt保存完成，length=%s", len(normalized))
+
+    def get_global_system_prompt(self) -> str:
+        """读取全局 SystemPrompt。"""
+        row = self._app_settings_dao.get_by_key(GLOBAL_SYSTEM_PROMPT_KEY)
+        if row is None:
+            return ""
+        return self._normalize_system_prompt(str(row.get("setting_value", "")))
+
+    def resolve_system_prompt(
+        self,
+        *,
+        capture_type_id: int | None = None,
+        scene: str = "analysis",
+    ) -> str:
+        """按优先级解析 system 提示词。"""
+        default_prompt = (
+            DEFAULT_CHAT_SYSTEM_PROMPT if scene == "chat" else DEFAULT_ANALYSIS_SYSTEM_PROMPT
+        )
+        if capture_type_id is not None:
+            capture_type = self.get_capture_type(capture_type_id)
+            capture_type_prompt = self._normalize_system_prompt(
+                str(capture_type.get("system_prompt", ""))
+            )
+            if capture_type_prompt:
+                self.logger.debug(
+                    "命中业务类型SystemPrompt，capture_type_id=%s, length=%s",
+                    capture_type_id,
+                    len(capture_type_prompt),
+                )
+                return capture_type_prompt
+
+        global_prompt = self.get_global_system_prompt()
+        if global_prompt:
+            self.logger.debug("命中全局SystemPrompt，scene=%s, length=%s", scene, len(global_prompt))
+            return global_prompt
+        self.logger.debug("命中内置默认SystemPrompt，scene=%s", scene)
+        return default_prompt
 
     def _validate_provider(self, payload: AIProviderPayload) -> None:
         """校验供应商输入。"""

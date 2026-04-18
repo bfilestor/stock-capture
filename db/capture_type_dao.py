@@ -19,7 +19,7 @@ class CaptureTypeDAO(BaseDAO):
     def list_all(self) -> list[dict[str, Any]]:
         """查询全部业务类型，按更新时间倒序。"""
         sql = """
-        SELECT id, name, description, prompt_template, is_enabled, created_at, updated_at
+        SELECT id, name, description, prompt_template, system_prompt, is_enabled, created_at, updated_at
         FROM capture_types
         ORDER BY datetime(updated_at) DESC, id DESC
         """
@@ -33,7 +33,7 @@ class CaptureTypeDAO(BaseDAO):
     def get_by_name(self, name: str) -> dict[str, Any] | None:
         """按名称查询业务类型。"""
         sql = """
-        SELECT id, name, description, prompt_template, is_enabled, created_at, updated_at
+        SELECT id, name, description, prompt_template, system_prompt, is_enabled, created_at, updated_at
         FROM capture_types
         WHERE name = ?
         """
@@ -47,7 +47,7 @@ class CaptureTypeDAO(BaseDAO):
     def list_enabled(self) -> list[dict[str, Any]]:
         """查询启用中的业务类型。"""
         sql = """
-        SELECT id, name, description, prompt_template, is_enabled, created_at, updated_at
+        SELECT id, name, description, prompt_template, system_prompt, is_enabled, created_at, updated_at
         FROM capture_types
         WHERE is_enabled = 1
         ORDER BY id ASC
@@ -60,7 +60,7 @@ class CaptureTypeDAO(BaseDAO):
     def get_by_id(self, capture_type_id: int) -> dict[str, Any] | None:
         """按ID查询业务类型。"""
         sql = """
-        SELECT id, name, description, prompt_template, is_enabled, created_at, updated_at
+        SELECT id, name, description, prompt_template, system_prompt, is_enabled, created_at, updated_at
         FROM capture_types
         WHERE id = ?
         """
@@ -75,18 +75,30 @@ class CaptureTypeDAO(BaseDAO):
         name: str,
         description: str,
         prompt_template: str,
+        system_prompt: str,
         is_enabled: int,
         created_at: str,
         updated_at: str,
     ) -> int:
         """创建业务类型并返回主键。"""
         sql = """
-        INSERT INTO capture_types (name, description, prompt_template, is_enabled, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO capture_types (
+          name, description, prompt_template, system_prompt, is_enabled, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         with self.transaction() as connection:
             cursor = connection.execute(
-                sql, (name, description, prompt_template, is_enabled, created_at, updated_at)
+                sql,
+                (
+                    name,
+                    description,
+                    prompt_template,
+                    system_prompt,
+                    is_enabled,
+                    created_at,
+                    updated_at,
+                ),
             )
             capture_type_id = int(cursor.lastrowid)
             self._logger.debug("创建业务类型成功，id=%s, name=%s", capture_type_id, name)
@@ -99,17 +111,19 @@ class CaptureTypeDAO(BaseDAO):
         name: str,
         description: str,
         prompt_template: str,
+        system_prompt: str,
         is_enabled: int,
         updated_at: str,
     ) -> int:
         """更新业务类型并返回影响行数。"""
         sql = """
         UPDATE capture_types
-        SET name = ?, description = ?, prompt_template = ?, is_enabled = ?, updated_at = ?
+        SET name = ?, description = ?, prompt_template = ?, system_prompt = ?, is_enabled = ?, updated_at = ?
         WHERE id = ?
         """
         return self.execute_write(
-            sql, (name, description, prompt_template, is_enabled, updated_at, capture_type_id)
+            sql,
+            (name, description, prompt_template, system_prompt, is_enabled, updated_at, capture_type_id),
         )
 
     def delete(self, capture_type_id: int) -> int:
