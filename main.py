@@ -10,10 +10,12 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from db.database import DatabaseBootstrap
+from services.analysis_history_service import AnalysisHistoryService
 from services.chat_window_manager import ChatWindowManager
 from services.capture_workflow_service import CaptureWorkflowService
 from services.config_service import ConfigService
 from services.result_service import ResultService
+from ui.chat.chat_window import ChatWindow
 from ui.settings_window import SettingsWindow
 from utils.logging_config import get_logger, setup_logging
 from utils.app_paths import get_db_path
@@ -47,6 +49,7 @@ def bootstrap() -> QApplication:
 
     config_service = ConfigService(db_bootstrap.db_path)
     result_service = ResultService(db_bootstrap.db_path)
+    analysis_history_service = AnalysisHistoryService(db_bootstrap.db_path)
     settings_window = SettingsWindow(config_service)
 
     def handle_parse_requested(context) -> None:
@@ -64,7 +67,9 @@ def bootstrap() -> QApplication:
         result_service=result_service,
         overlay_start_delay_ms=overlay_delay_ms,
     )
-    chat_window_manager = ChatWindowManager()
+    chat_window_manager = ChatWindowManager(
+        window_factory=lambda: ChatWindow(history_service=analysis_history_service)
+    )
     setattr(app, "_settings_window", settings_window)
     setattr(app, "_capture_workflow", capture_workflow)
     setattr(app, "_chat_window_manager", chat_window_manager)

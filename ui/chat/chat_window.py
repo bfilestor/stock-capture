@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any, Protocol
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QScrollArea,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -18,11 +21,13 @@ from utils.logging_config import get_logger
 class ChatWindow(QWidget):
     """托盘对话入口窗口。"""
 
-    def __init__(self) -> None:
+    def __init__(self, history_service: "_HistoryServiceLike | None" = None) -> None:
         """初始化对话窗口。"""
         super().__init__()
         self._logger = get_logger(__name__)
         self._history_expanded = False
+        self._history_service = history_service
+        self._history_import_buttons: list[QPushButton] = []
         self.setWindowTitle("AI对话")
         self.resize(960, 640)
         self._init_ui()
@@ -42,10 +47,21 @@ class ChatWindow(QWidget):
         history_layout = QVBoxLayout(self.history_panel)
         history_layout.setContentsMargins(10, 10, 10, 10)
         history_layout.addWidget(QLabel("历史AI分析结果", self.history_panel))
-        self.history_placeholder_label = QLabel("历史区将在后续 Issue 接入数据。", self.history_panel)
-        self.history_placeholder_label.setWordWrap(True)
-        history_layout.addWidget(self.history_placeholder_label)
-        history_layout.addStretch(1)
+
+        self.history_empty_label = QLabel("暂无历史分析结果", self.history_panel)
+        self.history_empty_label.setWordWrap(True)
+        self.history_empty_label.setStyleSheet("color:#607D8B;")
+
+        self.history_scroll_area = QScrollArea(self.history_panel)
+        self.history_scroll_area.setWidgetResizable(True)
+        self.history_scroll_content = QWidget(self.history_scroll_area)
+        self.history_scroll_layout = QVBoxLayout(self.history_scroll_content)
+        self.history_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.history_scroll_layout.setSpacing(8)
+        self.history_scroll_layout.addWidget(self.history_empty_label)
+        self.history_scroll_layout.addStretch(1)
+        self.history_scroll_area.setWidget(self.history_scroll_content)
+        history_layout.addWidget(self.history_scroll_area, 1)
         root_layout.addWidget(self.history_panel, 0)
 
         # 右侧对话区：当前提供输入/发送/清空占位。
@@ -99,4 +115,92 @@ class ChatWindow(QWidget):
         self._history_expanded = expanded
         self.history_panel.setVisible(expanded)
         self.toggle_history_button.setText("收起历史" if expanded else "展开历史")
+        if expanded:
+            self._reload_history_records()
         self._logger.debug("历史面板状态更新，expanded=%s", expanded)
+
+    def history_record_count(self) -> int:
+        """返回历史记录条数（测试辅助）。"""
+        return len(self._history_import_buttons)
+
+    def history_import_buttons(self) -> list[QPushButton]:
+        """返回历史记录引入按钮列表（测试辅助）。"""
+        return list(self._history_import_buttons)
+
+    def _clear_history_records(self) -> None:
+        """清空历史记录列表组件。"""
+        self._history_import_buttons.clear()
+        while self.history_scroll_layout.count() > 0:
+            item = self.history_scroll_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _reload_history_records(self) -> None:
+        """刷新历史记录显示。"""
+        self._clear_history_records()
+        records: list[dict[str, Any]] = []
+        if self._history_service is not None:
+            try:
+                records = list(self._history_service.list_recent_results(limit=100))
+            except Exception:  # pragma: no cover - 防御性兜底
+                self._logger.exception("历史记录加载失败")
+                records = []
+
+        if not records:
+            self.history_empty_label = QLabel("暂无历史分析结果", self.history_scroll_content)
+            self.history_empty_label.setWordWrap(True)
+            self.history_empty_label.setStyleSheet("color:#607D8B;")
+            self.history_scroll_layout.addWidget(self.history_empty_label)
+            self.history_scroll_layout.addStretch(1)
+            self._logger.debug("历史记录为空，显示空态")
+            return
+
+        for record in records:
+            item_widget = self._build_history_item(record)
+            self.history_scroll_layout.addWidget(item_widget)
+        self.history_scroll_layout.addStretch(1)
+        self._logger.debug("历史记录刷新完成，count=%s", len(records))
+
+    def _build_history_item(self, record: dict[str, Any]) -> QWidget:
+        """构建单条历史记录卡片。"""
+        container = QWidget(self.history_scroll_content)
+        container.setStyleSheet("border:1px solid #CFD8DC; border-radius:4px;")
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+
+        title = QLabel(
+            f"{record.get('result_date', '')} · {record.get('capture_type_name', '')}",
+            container,
+        )
+        title.setStyleSheet("font-weight:600;")
+        layout.addWidget(title)
+
+        summary = QLabel(str(record.get("summary", "")), container)
+        summary.setWordWrap(True)
+        summary.setStyleSheet("color:#455A64;")
+        layout.addWidget(summary)
+
+        import_button = QPushButton("引入", container)
+        import_button.clicked.connect(
+            lambda _checked=False, text=str(record.get("final_json_text", "")): self._import_history_text(
+                text
+            )
+        )
+        layout.addWidget(import_button, 0, Qt.AlignRight)
+        self._history_import_buttons.append(import_button)
+        return container
+
+    def _import_history_text(self, text: str) -> None:
+        """将历史结果文本引入输入框。"""
+        self.input_edit.setPlainText(text)
+        self.input_edit.setFocus()
+        self._logger.debug("历史记录已引入输入框，text_len=%s", len(text))
+
+
+class _HistoryServiceLike(Protocol):
+    """历史服务协议，便于窗口依赖注入。"""
+
+    def list_recent_results(self, limit: int = 100) -> list[dict[str, Any]]:
+        """返回历史结果列表。"""

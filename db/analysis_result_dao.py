@@ -107,3 +107,27 @@ class AnalysisResultDAO(BaseDAO):
             row = connection.execute(sql, (result_date, capture_type_id)).fetchone()
             return dict(row) if row else None
 
+    def list_recent(self, limit: int = 100) -> list[dict[str, Any]]:
+        """按更新时间倒序查询历史分析结果。"""
+        sql = """
+        SELECT
+          ar.id,
+          ar.result_date,
+          ar.capture_type_id,
+          ar.image_path,
+          ar.ocr_text,
+          ar.ai_raw_response,
+          ar.final_json_text,
+          ar.created_at,
+          ar.updated_at,
+          COALESCE(ct.name, '未知业务类型') AS capture_type_name
+        FROM analysis_results ar
+        LEFT JOIN capture_types ct ON ct.id = ar.capture_type_id
+        ORDER BY ar.updated_at DESC, ar.id DESC
+        LIMIT ?
+        """
+        with self.transaction() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(sql, (max(1, int(limit)),)).fetchall()
+            self._logger.debug("查询历史分析结果完成，limit=%s, count=%s", limit, len(rows))
+            return [dict(row) for row in rows]
