@@ -31,6 +31,7 @@ class AnalysisTaskWorker(QRunnable):
         ai_service: AIService,
         image_path: str,
         prompt: str,
+        system_prompt: str | None = None,
         max_retries: int = 1,
     ) -> None:
         """初始化工作线程。"""
@@ -40,6 +41,7 @@ class AnalysisTaskWorker(QRunnable):
         self._ai_service = ai_service
         self._image_path = image_path
         self._prompt = prompt
+        self._system_prompt = system_prompt
         self._max_retries = max_retries
 
     def _run_with_retry(self, func: Callable[[], object], retry_codes: set[str]) -> object:
@@ -70,7 +72,7 @@ class AnalysisTaskWorker(QRunnable):
 
             self.signals.stage.emit("AI分析中")
             ai_result = self._run_with_retry(
-                lambda: self._ai_service.run_ai_with_meta(self._prompt, ocr_text),
+                lambda: self._run_ai_with_meta(ocr_text),
                 {"AI_001"},
             )
             raw_response_text = json.dumps(ai_result.raw_response, ensure_ascii=False)
@@ -81,6 +83,18 @@ class AnalysisTaskWorker(QRunnable):
             self.signals.error.emit("PIPE_001", str(exc))
         finally:
             self.signals.finished.emit()
+
+    def _run_ai_with_meta(self, ocr_text: str):
+        """兼容调用 AI 服务并附带 system_prompt。"""
+        try:
+            return self._ai_service.run_ai_with_meta(
+                self._prompt,
+                ocr_text,
+                system_prompt=self._system_prompt,
+            )
+        except TypeError:
+            # 兼容旧测试替身签名：run_ai_with_meta(prompt, ocr_text)
+            return self._ai_service.run_ai_with_meta(self._prompt, ocr_text)
 
 
 class OCRTaskSignals(QObject):
@@ -159,6 +173,7 @@ class AITaskWorker(QRunnable):
         ai_service: AIService,
         prompt: str,
         ocr_text: str,
+        system_prompt: str | None = None,
         max_retries: int = 1,
     ) -> None:
         """初始化 AI 工作线程。"""
@@ -167,6 +182,7 @@ class AITaskWorker(QRunnable):
         self._ai_service = ai_service
         self._prompt = prompt
         self._ocr_text = ocr_text
+        self._system_prompt = system_prompt
         self._max_retries = max_retries
 
     def _run_with_retry(self, func: Callable[[], object], retry_codes: set[str]) -> object:
@@ -189,7 +205,7 @@ class AITaskWorker(QRunnable):
         try:
             self.signals.stage.emit("AI分析中")
             ai_result = self._run_with_retry(
-                lambda: self._ai_service.run_ai_with_meta(self._prompt, self._ocr_text),
+                self._run_ai_with_meta,
                 {"AI_001"},
             )
             raw_response_text = json.dumps(ai_result.raw_response, ensure_ascii=False)
@@ -200,6 +216,18 @@ class AITaskWorker(QRunnable):
             self.signals.error.emit("PIPE_001", str(exc))
         finally:
             self.signals.finished.emit()
+
+    def _run_ai_with_meta(self):
+        """兼容调用 AI 服务并附带 system_prompt。"""
+        try:
+            return self._ai_service.run_ai_with_meta(
+                self._prompt,
+                self._ocr_text,
+                system_prompt=self._system_prompt,
+            )
+        except TypeError:
+            # 兼容旧测试替身签名：run_ai_with_meta(prompt, ocr_text)
+            return self._ai_service.run_ai_with_meta(self._prompt, self._ocr_text)
 
 
 class AnalysisPipelineService(BaseService):
@@ -232,6 +260,7 @@ class AnalysisPipelineService(BaseService):
         on_stage: Callable[[str], None],
         on_success: Callable[[str, str, str], None],
         on_error: Callable[[str, str], None],
+        system_prompt: str | None = None,
     ) -> bool:
         """启动异步解析任务，返回是否启动成功。"""
         if self._is_running:
@@ -244,6 +273,7 @@ class AnalysisPipelineService(BaseService):
             ai_service=self._ai_service,
             image_path=image_path,
             prompt=prompt,
+            system_prompt=system_prompt,
             max_retries=self._max_retries,
         )
         self._worker = worker
@@ -312,6 +342,7 @@ class AnalysisPipelineService(BaseService):
         on_stage: Callable[[str], None],
         on_success: Callable[[str, str], None],
         on_error: Callable[[str, str], None],
+        system_prompt: str | None = None,
     ) -> bool:
         """启动异步 AI 任务，返回是否启动成功。"""
         if self._is_running:
@@ -323,6 +354,7 @@ class AnalysisPipelineService(BaseService):
             ai_service=self._ai_service,
             prompt=prompt,
             ocr_text=ocr_text,
+            system_prompt=system_prompt,
             max_retries=self._max_retries,
         )
         self._worker = worker

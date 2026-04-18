@@ -209,6 +209,19 @@ class CaptureWorkflowService:
         )
         return prompt
 
+    def _resolve_system_prompt(self) -> str:
+        """读取当前业务类型对应的 SystemPrompt。"""
+        system_prompt = self._config_service.resolve_system_prompt(
+            capture_type_id=self.context.capture_type_id,
+            scene="analysis",
+        )
+        self._logger.debug(
+            "读取SystemPrompt完成，capture_type_id=%s, length=%s",
+            self.context.capture_type_id,
+            len(system_prompt),
+        )
+        return system_prompt
+
     def _on_send_requested(self, image_path: str) -> None:
         """处理发送解析入口：先执行 OCR。"""
         if self.context.capture_type_id is None:
@@ -268,14 +281,26 @@ class CaptureWorkflowService:
         self.context.state = "ai_processing"
         self._show_ocr_compare_stage("AI分析中")
         self._logger.debug("开始 AI 解析，ocr_len=%s", len(ocr_text))
+        system_prompt = self._resolve_system_prompt()
 
-        started = self._analysis_pipeline.start_ai(
-            prompt=prompt,
-            ocr_text=ocr_text,
-            on_stage=self._on_ai_stage,
-            on_success=self._on_ai_success,
-            on_error=self._on_pipeline_error,
-        )
+        try:
+            started = self._analysis_pipeline.start_ai(
+                prompt=prompt,
+                ocr_text=ocr_text,
+                on_stage=self._on_ai_stage,
+                on_success=self._on_ai_success,
+                on_error=self._on_pipeline_error,
+                system_prompt=system_prompt,
+            )
+        except TypeError:
+            # 兼容旧测试替身签名：start_ai(prompt, ocr_text, on_stage, on_success, on_error)
+            started = self._analysis_pipeline.start_ai(
+                prompt=prompt,
+                ocr_text=ocr_text,
+                on_stage=self._on_ai_stage,
+                on_success=self._on_ai_success,
+                on_error=self._on_pipeline_error,
+            )
         if not started:
             self._show_ocr_compare_retry("解析进行中，请勿重复点击AI解析")
 

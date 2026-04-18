@@ -33,7 +33,7 @@ class AIService(BaseService):
         self.last_raw_response: dict[str, Any] | None = None
 
     @staticmethod
-    def _build_messages(prompt: str, ocr_text: str) -> list[dict[str, str]]:
+    def _build_messages(prompt: str, ocr_text: str, system_prompt: str) -> list[dict[str, str]]:
         """构建 OpenAI 兼容消息体。"""
         user_content = (
             f"请根据以下Prompt和OCR文本进行结构化提取。\n\n"
@@ -41,7 +41,7 @@ class AIService(BaseService):
             f"OCR文本:\n{ocr_text}"
         )
         return [
-            {"role": "system", "content": "只返回JSON"},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ]
 
@@ -53,7 +53,12 @@ class AIService(BaseService):
             return f"{normalized}/chat/completions"
         return f"{normalized}/v1/chat/completions"
 
-    def run_ai_with_meta(self, prompt: str, ocr_text: str) -> AIRunResult:
+    def run_ai_with_meta(
+        self,
+        prompt: str,
+        ocr_text: str,
+        system_prompt: str | None = None,
+    ) -> AIRunResult:
         """执行 AI 调用并返回完整元信息。"""
         if not prompt.strip():
             raise ServiceError("AI_003", "Prompt 不能为空")
@@ -66,17 +71,24 @@ class AIService(BaseService):
         api_key = str(provider.get("api_key", "")).strip()
         model_code = str(model.get("model_code", "")).strip()
         chat_url = self._build_chat_url(base_url)
+        resolved_system_prompt = str(system_prompt or "").strip()
+        if not resolved_system_prompt:
+            resolved_system_prompt = self._config_service.resolve_system_prompt(scene="analysis")
 
         payload = {
             "model": model_code,
-            "messages": self._build_messages(prompt, ocr_text),
+            "messages": self._build_messages(prompt, ocr_text, resolved_system_prompt),
         }
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
         self.logger.debug(
-            "开始调用 AI，provider_id=%s, model=%s, url=%s", provider_id, model_code, chat_url
+            "开始调用 AI，provider_id=%s, model=%s, url=%s, system_prompt_len=%s",
+            provider_id,
+            model_code,
+            chat_url,
+            len(resolved_system_prompt),
         )
         try:
             response = httpx.post(
@@ -120,7 +132,6 @@ class AIService(BaseService):
             model_code=model_code,
         )
 
-    def run_ai(self, prompt: str, ocr_text: str) -> str:
+    def run_ai(self, prompt: str, ocr_text: str, system_prompt: str | None = None) -> str:
         """执行 AI 调用并返回内容字符串。"""
-        return self.run_ai_with_meta(prompt, ocr_text).content
-
+        return self.run_ai_with_meta(prompt, ocr_text, system_prompt=system_prompt).content

@@ -58,5 +58,5 @@
 | E8-S2-I2 | AI对话服务封装与异步发送状态控制 | Test Passed | E2-S2-I2,E8-S1-I2 | FT-E8-S2-I2-01/BT-E8-S2-I2-01 通过 | P0 |
 | E8-S2-I3 | 聊天气泡收起展开与清空聊天 | Test Passed | E8-S2-I2 | FT-E8-S2-I3-01/BT-E8-S2-I3-01 通过 | P0 |
 | E9-S1-I1 | 业务类型与全局SystemPrompt字段扩展 | Test Passed | E2-S1-I1,E2-S2-I1,E1-S2-I1 | FT-E9-S1-I1-01/02/03，BT-E9-S1-I1-01 通过 | P0 |
-| E9-S2-I1 | 截图解析链路SystemPrompt注入与回退 | Todo | E4-S2-I1,E4-S2-I2,E9-S1-I1 | 待补充 | P0 |
-| E9-S2-I2 | 对话链路全局SystemPrompt注入 | Todo | E8-S2-I2,E9-S1-I1 | 待补充 | P1 |
+| E9-S2-I1 | 截图解析链路SystemPrompt注入与回退 | Test Passed | E4-S2-I1,E4-S2-I2,E9-S1-I1 | FT-E9-S2-I1-01/02/03，BT-E9-S2-I1-01 通过 | P0 |
+| E9-S2-I2 | 对话链路全局SystemPrompt注入 | Test Passed | E8-S2-I2,E9-S1-I1 | FT-E9-S2-I2-01/02，BT-E9-S2-I2-01/02 通过 | P1 |
