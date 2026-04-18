@@ -17,10 +17,11 @@ from services.chat_window_manager import ChatWindowManager
 from services.capture_workflow_service import CaptureWorkflowService
 from services.config_service import ConfigService
 from services.result_service import ResultService
+from services.single_instance_guard import SingleInstanceGuard
 from ui.chat.chat_window import ChatWindow
 from ui.settings_window import SettingsWindow
 from utils.logging_config import get_logger, setup_logging
-from utils.app_paths import get_db_path
+from utils.app_paths import get_db_path, get_instance_lock_path
 from tray.tray_manager import TrayManager
 
 
@@ -32,7 +33,7 @@ def create_application(argv: list[str] | None = None) -> QApplication:
     return app
 
 
-def bootstrap() -> QApplication:
+def bootstrap() -> QApplication | None:
     """完成日志、托盘管理器等基础初始化。"""
     log_dir_env = os.getenv("STOCK_CAPTURE_LOG_DIR")
     log_dir = Path(log_dir_env) if log_dir_env else None
@@ -41,7 +42,15 @@ def bootstrap() -> QApplication:
     logger = get_logger(__name__)
     logger.debug("bootstrap 开始执行，日志文件路径: %s", log_file)
 
+    # 先做进程单例校验，避免重复启动创建多个托盘图标。
+    instance_guard = SingleInstanceGuard(get_instance_lock_path())
+    if not instance_guard.acquire():
+        logger.warning("检测到已有运行实例，当前进程将直接退出")
+        return None
+
     app = create_application()
+    app.aboutToQuit.connect(instance_guard.release)
+    setattr(app, "_instance_guard", instance_guard)
     overlay_delay_ms = max(0, int(os.getenv("STOCK_CAPTURE_OVERLAY_DELAY_MS", "300") or "300"))
 
     # 启动时自动建库，保障后续配置与结果可持久化。
@@ -131,6 +140,9 @@ def run() -> int:
     """运行应用事件循环并返回退出码。"""
     logger = get_logger(__name__)
     app = bootstrap()
+    if app is None:
+        logger.info("重复启动已拦截，进程退出")
+        return 0
     logger.debug("应用初始化完成，准备进入事件循环")
     exit_code = app.exec()
     logger.info("事件循环结束，退出码=%s", exit_code)

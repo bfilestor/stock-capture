@@ -48,3 +48,11 @@ def get_capture_temp_dir() -> Path:
     if custom_dir:
         return Path(custom_dir)
     return get_project_root() / "runtime" / "captures"
+
+
+def get_instance_lock_path() -> Path:
+    """返回单实例锁文件路径。"""
+    custom_path = os.getenv("STOCK_CAPTURE_INSTANCE_LOCK_PATH")
+    if custom_path:
+        return Path(custom_path)
+    return get_data_dir() / ".stock_capture.instance.lock"
