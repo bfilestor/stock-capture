@@ -63,3 +63,18 @@ def test_bt_e8_s2_i3_01_超长消息收起仅显示一行(app: QApplication) -> 
     bubble.set_collapsed(False)
     assert bubble.is_collapsed() is False
     assert bubble.display_text() == long_text
+    assert bubble.toggle_button.minimumHeight() >= 30
+
+
+def test_ft_e8_s2_i3_02_可单独清空输入框内容(app: QApplication) -> None:
+    """功能测试：点击清空输入框按钮仅清空输入文本。"""
+    dialog = ChatWindow(chat_pipeline=FakeChatPipeline())
+    dialog.input_edit.setPlainText("保留聊天，清空输入框")
+    dialog.send_button.click()
+    assert dialog.message_bubble_count() == 2
+
+    dialog.input_edit.setPlainText("待清空输入")
+    dialog.clear_input_button.click()
+
+    assert dialog.input_edit.toPlainText() == ""
+    assert dialog.message_bubble_count() == 2

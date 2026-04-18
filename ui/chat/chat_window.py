@@ -34,6 +34,8 @@ class ChatWindow(QWidget):
         self._history_service = history_service
         self._chat_pipeline = chat_pipeline
         self._history_import_buttons: list[QPushButton] = []
+        self._history_detail_toggle_buttons: list[QPushButton] = []
+        self._history_detail_labels: list[QLabel] = []
         self._chat_messages: list[dict[str, str]] = []
         self._chat_bubbles: list[ChatMessageBubble] = []
         self._pending_user_text = ""
@@ -108,8 +110,10 @@ class ChatWindow(QWidget):
 
         action_layout = QHBoxLayout()
         self.clear_button = QPushButton("清空聊天内容", self)
+        self.clear_input_button = QPushButton("清空输入框", self)
         self.send_button = QPushButton("发送", self)
         action_layout.addWidget(self.clear_button)
+        action_layout.addWidget(self.clear_input_button)
         action_layout.addStretch(1)
         action_layout.addWidget(self.send_button)
         right_layout.addLayout(action_layout)
@@ -122,6 +126,7 @@ class ChatWindow(QWidget):
         self._set_history_expanded(False)
         self.send_button.clicked.connect(self._on_send_clicked)
         self.clear_button.clicked.connect(self._on_clear_clicked)
+        self.clear_input_button.clicked.connect(self._on_clear_input_clicked)
         self._logger.debug("对话窗口 UI 初始化完成，history_expanded=%s", self._history_expanded)
 
     def is_history_expanded(self) -> bool:
@@ -149,9 +154,20 @@ class ChatWindow(QWidget):
         """返回历史记录引入按钮列表（测试辅助）。"""
         return list(self._history_import_buttons)
 
+    def history_item_expanded_states(self) -> list[bool]:
+        """返回历史记录详情展开状态列表（测试辅助）。"""
+        # 这里使用 isHidden，避免窗口未 show 时 isVisible 始终为 False 导致测试误判。
+        return [not label.isHidden() for label in self._history_detail_labels]
+
+    def history_item_toggle_buttons(self) -> list[QPushButton]:
+        """返回历史记录展开按钮列表（测试辅助）。"""
+        return list(self._history_detail_toggle_buttons)
+
     def _clear_history_records(self) -> None:
         """清空历史记录列表组件。"""
         self._history_import_buttons.clear()
+        self._history_detail_toggle_buttons.clear()
+        self._history_detail_labels.clear()
         while self.history_scroll_layout.count() > 0:
             item = self.history_scroll_layout.takeAt(0)
             widget = item.widget()
@@ -178,31 +194,64 @@ class ChatWindow(QWidget):
             self._logger.debug("历史记录为空，显示空态")
             return
 
-        for record in records:
-            self.history_scroll_layout.addWidget(self._build_history_item(record))
+        for index, record in enumerate(records):
+            is_latest = index == 0
+            self.history_scroll_layout.addWidget(self._build_history_item(record, expanded=is_latest))
         self.history_scroll_layout.addStretch(1)
         self._logger.debug("历史记录刷新完成，count=%s", len(records))
 
-    def _build_history_item(self, record: dict[str, Any]) -> QWidget:
+    def _build_history_item(self, record: dict[str, Any], expanded: bool) -> QWidget:
         """构建单条历史记录卡片。"""
         container = QWidget(self.history_scroll_content)
         container.setStyleSheet("border:1px solid #CFD8DC; border-radius:4px;")
         layout = QVBoxLayout(container)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(4)
+        title_row = QHBoxLayout()
+        title_row.setContentsMargins(0, 0, 0, 0)
+        title_row.setSpacing(8)
         title = QLabel(f"{record.get('result_date', '')} · {record.get('capture_type_name', '')}", container)
         title.setStyleSheet("font-weight:600;")
-        layout.addWidget(title)
+        title_row.addWidget(title, 1)
+        detail_toggle_button = QPushButton(container)
+        detail_toggle_button.setMinimumHeight(28)
+        detail_toggle_button.setStyleSheet("padding:4px 10px;")
+        title_row.addWidget(detail_toggle_button, 0, Qt.AlignRight)
+        self._history_detail_toggle_buttons.append(detail_toggle_button)
+        layout.addLayout(title_row)
+
         summary = QLabel(str(record.get("summary", "")), container)
         summary.setWordWrap(True)
         summary.setStyleSheet("color:#455A64;")
         layout.addWidget(summary)
+
+        detail_label = QLabel(str(record.get("final_json_text", "")), container)
+        detail_label.setWordWrap(True)
+        detail_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        detail_label.setStyleSheet("color:#263238; background:#ECEFF1; border-radius:4px; padding:6px;")
+        layout.addWidget(detail_label)
+        self._history_detail_labels.append(detail_label)
+
         import_button = QPushButton("引入", container)
         import_button.clicked.connect(
             lambda _checked=False, text=str(record.get("final_json_text", "")): self._import_history_text(text)
         )
         layout.addWidget(import_button, 0, Qt.AlignRight)
         self._history_import_buttons.append(import_button)
+
+        def _set_expanded_state(is_expanded: bool) -> None:
+            """设置单条历史记录展开/收起状态。"""
+            detail_label.setVisible(is_expanded)
+            detail_toggle_button.setText("收起" if is_expanded else "展开")
+            self._logger.debug(
+                "历史记录卡片状态更新，capture_type=%s, result_date=%s, expanded=%s",
+                record.get("capture_type_name", ""),
+                record.get("result_date", ""),
+                is_expanded,
+            )
+
+        detail_toggle_button.clicked.connect(lambda _checked=False: _set_expanded_state(detail_label.isHidden()))
+        _set_expanded_state(expanded)
         return container
 
     def _import_history_text(self, text: str) -> None:
@@ -230,6 +279,7 @@ class ChatWindow(QWidget):
         self.send_button.setEnabled(not busy)
         self.send_button.setText("思考中..." if busy else "发送")
         self.input_edit.setEnabled(not busy)
+        self.clear_input_button.setEnabled(not busy)
         if busy:
             self._set_status(stage_text or "AI思考中")
 
@@ -349,6 +399,13 @@ class ChatWindow(QWidget):
         self.message_scroll_layout.addStretch(1)
         self._set_status("聊天内容已清空")
         self._logger.debug("用户已清空聊天内容")
+
+    def _on_clear_input_clicked(self) -> None:
+        """清空输入框内容。"""
+        self.input_edit.clear()
+        self.input_edit.setFocus()
+        self._set_status("输入框内容已清空")
+        self._logger.debug("用户已清空输入框内容")
 
 
 class _HistoryServiceLike(Protocol):

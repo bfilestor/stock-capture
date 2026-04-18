@@ -21,6 +21,7 @@ class ChatMessageBubble(QWidget):
 
     def _init_ui(self) -> None:
         """构建气泡界面。"""
+        self.setObjectName("chatMessageBubble")
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(4)
@@ -32,7 +33,8 @@ class ChatMessageBubble(QWidget):
         self.role_label = QLabel(role_name, self)
         self.role_label.setStyleSheet("font-weight:600; color:#37474F;")
         self.toggle_button = QPushButton("收起", self)
-        self.toggle_button.setFixedHeight(24)
+        self.toggle_button.setMinimumHeight(30)
+        self.toggle_button.setStyleSheet("padding:4px 10px;")
         self.toggle_button.clicked.connect(self._on_toggle_clicked)
         header_layout.addWidget(self.role_label)
         header_layout.addStretch(1)
@@ -45,7 +47,10 @@ class ChatMessageBubble(QWidget):
         root_layout.addWidget(self.content_label)
 
         bubble_bg = "#E3F2FD" if self.role == "user" else "#F5F5F5"
-        self.setStyleSheet(f"QWidget{{background:{bubble_bg}; border:1px solid #CFD8DC; border-radius:8px; padding:8px;}}")
+        # 仅给气泡根容器设置背景与边框，避免把子控件（如按钮）挤压到文字被裁切。
+        self.setStyleSheet(
+            f"#chatMessageBubble{{background:{bubble_bg}; border:1px solid #CFD8DC; border-radius:8px; padding:8px;}}"
+        )
         self.setMinimumWidth(260)
         self.setMaximumWidth(560)
 
