@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Any, Callable
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
@@ -26,7 +26,7 @@ class ChatTaskWorker(QRunnable):
     def __init__(
         self,
         chat_service: ChatService,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         max_retries: int = 1,
     ) -> None:
         """初始化对话任务。"""
@@ -91,7 +91,7 @@ class ChatPipelineService(BaseService):
 
     def start_chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         on_stage: Callable[[str], None],
         on_success: Callable[[str], None],
         on_error: Callable[[str, str], None],

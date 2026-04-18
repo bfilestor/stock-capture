@@ -30,19 +30,50 @@ class ChatService(BaseService):
         return f"{normalized}/v1/chat/completions"
 
     @staticmethod
-    def _validate_messages(messages: list[dict[str, str]]) -> None:
+    def _validate_messages(messages: list[dict[str, Any]]) -> None:
         """校验消息体输入。"""
         if not messages:
             raise ServiceError("CHAT_003", "消息列表不能为空")
         for index, message in enumerate(messages):
             role = str(message.get("role", "")).strip()
-            content = str(message.get("content", "")).strip()
             if role not in {"system", "user", "assistant"}:
                 raise ServiceError("CHAT_003", f"消息角色非法(index={index})")
-            if not content:
-                raise ServiceError("CHAT_003", f"消息内容不能为空(index={index})")
 
-    def run_chat(self, messages: list[dict[str, str]]) -> str:
+            content = message.get("content")
+            if isinstance(content, str):
+                if not content.strip():
+                    raise ServiceError("CHAT_003", f"消息内容不能为空(index={index})")
+                continue
+
+            if isinstance(content, list):
+                if not content:
+                    raise ServiceError("CHAT_003", f"消息内容不能为空(index={index})")
+                has_valid_part = False
+                for part_index, part in enumerate(content):
+                    if not isinstance(part, dict):
+                        raise ServiceError("CHAT_003", f"消息片段结构非法(index={index}, part={part_index})")
+                    part_type = str(part.get("type", "")).strip()
+                    if part_type == "text":
+                        text_value = str(part.get("text", "")).strip()
+                        if text_value:
+                            has_valid_part = True
+                        continue
+                    if part_type == "image_url":
+                        image_url = part.get("image_url", {})
+                        if not isinstance(image_url, dict):
+                            raise ServiceError("CHAT_003", f"图片片段结构非法(index={index}, part={part_index})")
+                        url_value = str(image_url.get("url", "")).strip()
+                        if url_value:
+                            has_valid_part = True
+                            continue
+                    raise ServiceError("CHAT_003", f"消息片段类型非法(index={index}, part={part_index})")
+                if not has_valid_part:
+                    raise ServiceError("CHAT_003", f"消息内容不能为空(index={index})")
+                continue
+
+            raise ServiceError("CHAT_003", f"消息内容结构非法(index={index})")
+
+    def run_chat(self, messages: list[dict[str, Any]]) -> str:
         """执行 AI 对话请求并返回回复内容。"""
         self._validate_messages(messages)
         provider, model = self._config_service.resolve_active_provider_model()
@@ -56,7 +87,21 @@ class ChatService(BaseService):
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        self.logger.debug("开始调用对话接口，url=%s, model=%s, message_count=%s", chat_url, model_code, len(messages))
+        has_image_input = any(
+            isinstance(msg.get("content"), list)
+            and any(
+                isinstance(part, dict) and str(part.get("type", "")).strip() == "image_url"
+                for part in msg.get("content", [])
+            )
+            for msg in messages
+        )
+        self.logger.debug(
+            "开始调用对话接口，url=%s, model=%s, message_count=%s, has_image_input=%s",
+            chat_url,
+            model_code,
+            len(messages),
+            has_image_input,
+        )
         try:
             response = httpx.post(
                 chat_url,

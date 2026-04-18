@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtWidgets import QApplication
 
@@ -23,7 +25,7 @@ class FakeChatPipeline:
     def __init__(self, mode: str = "success") -> None:
         self.mode = mode
         self.started_count = 0
-        self.last_messages: list[dict[str, str]] = []
+        self.last_messages: list[dict] = []
         self._running = False
 
     def is_running(self) -> bool:
@@ -56,6 +58,7 @@ def test_ft_e8_s2_i2_02_发送成功后恢复按钮并追加回复(app: QApplica
     dialog.send_button.click()
 
     assert pipeline.started_count == 1
+    assert isinstance(pipeline.last_messages[-1]["content"], str)
     assert dialog.send_button.isEnabled() is True
     assert dialog.send_button.text() == "发送"
     assert "这是AI回复" in dialog.message_area_placeholder.text()
@@ -74,3 +77,40 @@ def test_bt_e8_s2_i2_02_发送失败时保留输入并允许重试(app: QApplica
     assert dialog.send_button.isEnabled() is True
     assert dialog.send_button.text() == "发送"
     assert "连接失败" in dialog.status_label.text()
+
+
+def test_ft_e8_s2_i2_03_选择图片后按多模态发送(app: QApplication, tmp_path: Path) -> None:
+    """功能测试：选择图片后应构建 image_url 片段并正常发送。"""
+    pipeline = FakeChatPipeline(mode="success")
+    dialog = ChatWindow(chat_pipeline=pipeline)
+    image_path = tmp_path / "sample.png"
+    image_path.write_bytes(b"fake-image")
+
+    dialog.input_edit.setPlainText("请分析这张图")
+    dialog._append_selected_images([str(image_path)])  # type: ignore[attr-defined]
+    assert dialog.selected_image_count() == 1
+
+    dialog.send_button.click()
+
+    assert pipeline.started_count == 1
+    user_message = pipeline.last_messages[-1]
+    assert user_message["role"] == "user"
+    assert isinstance(user_message["content"], list)
+    assert user_message["content"][0]["type"] == "text"
+    assert user_message["content"][1]["type"] == "image_url"
+    assert user_message["content"][1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert dialog.selected_image_count() == 0
+
+
+def test_bt_e8_s2_i2_03_最多仅允许选择三张图片(app: QApplication, tmp_path: Path) -> None:
+    """边界测试：选择超过3张图片时应自动限制为3张。"""
+    pipeline = FakeChatPipeline(mode="success")
+    dialog = ChatWindow(chat_pipeline=pipeline)
+    paths: list[str] = []
+    for idx in range(4):
+        image_path = tmp_path / f"sample_{idx}.png"
+        image_path.write_bytes(b"fake-image")
+        paths.append(str(image_path))
+
+    dialog._append_selected_images(paths)  # type: ignore[attr-defined]
+    assert dialog.selected_image_count() == 3

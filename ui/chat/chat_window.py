@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import base64
+import mimetypes
+from pathlib import Path
 from typing import Any, Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics, QTextCursor
 from PySide6.QtWidgets import (
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -43,9 +47,11 @@ class ChatWindow(QWidget):
         self._history_page_size = 10
         self._history_current_offset = 0
         self._history_has_more = False
-        self._chat_messages: list[dict[str, str]] = []
+        self._chat_messages: list[dict[str, Any]] = []
         self._chat_bubbles: list[ChatMessageBubble] = []
-        self._pending_user_text = ""
+        self._selected_image_paths: list[str] = []
+        self._pending_user_message: dict[str, Any] | None = None
+        self._pending_user_display_text = ""
         self.setWindowTitle("AI对话")
         self.resize(980, 680)
         self._init_ui()
@@ -103,7 +109,7 @@ class ChatWindow(QWidget):
         self.message_scroll_layout = QVBoxLayout(self.message_scroll_content)
         self.message_scroll_layout.setContentsMargins(6, 6, 6, 6)
         self.message_scroll_layout.setSpacing(10)
-        self.message_area_placeholder = QLabel("聊天气泡区域将在后续 Issue 完成。", self.message_scroll_content)
+        self.message_area_placeholder = QLabel("聊天记录区", self.message_scroll_content)
         self.message_area_placeholder.setObjectName("chatMessageAreaPlaceholder")
         self.message_area_placeholder.setStyleSheet(
             "border:1px solid #CFD8DC; padding:10px; color:#607D8B;"
@@ -114,6 +120,29 @@ class ChatWindow(QWidget):
         self.message_scroll_layout.addStretch(1)
         self.message_scroll_area.setWidget(self.message_scroll_content)
         right_layout.addWidget(self.message_scroll_area, 1)
+
+        image_toolbar_layout = QHBoxLayout()
+        image_toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        image_toolbar_layout.setSpacing(6)
+        self.add_image_button = QPushButton("添加图片", self)
+        self.add_image_button.setMinimumHeight(28)
+        self.add_image_button.clicked.connect(self._on_add_images_clicked)
+        self.clear_images_button = QPushButton("清空图片", self)
+        self.clear_images_button.setMinimumHeight(28)
+        self.clear_images_button.clicked.connect(self._on_clear_images_clicked)
+        self.selected_images_hint_label = QLabel("最多可添加 3 张图片", self)
+        self.selected_images_hint_label.setStyleSheet("color:#607D8B;")
+        image_toolbar_layout.addWidget(self.add_image_button)
+        image_toolbar_layout.addWidget(self.clear_images_button)
+        image_toolbar_layout.addWidget(self.selected_images_hint_label)
+        image_toolbar_layout.addStretch(1)
+        right_layout.addLayout(image_toolbar_layout)
+
+        self.selected_images_container = QWidget(self)
+        self.selected_images_layout = QHBoxLayout(self.selected_images_container)
+        self.selected_images_layout.setContentsMargins(0, 0, 0, 0)
+        self.selected_images_layout.setSpacing(6)
+        right_layout.addWidget(self.selected_images_container)
 
         self.input_edit = QTextEdit(self)
         self.input_edit.setPlaceholderText("请输入要与 AI 对话的内容...")
@@ -139,6 +168,7 @@ class ChatWindow(QWidget):
         self.send_button.clicked.connect(self._on_send_clicked)
         self.clear_button.clicked.connect(self._on_clear_clicked)
         self.clear_input_button.clicked.connect(self._on_clear_input_clicked)
+        self._refresh_selected_images_ui()
         self._logger.debug("对话窗口 UI 初始化完成，history_expanded=%s", self._history_expanded)
 
     def is_history_expanded(self) -> bool:
@@ -186,6 +216,132 @@ class ChatWindow(QWidget):
     def history_item_detail_texts(self) -> list[str]:
         """返回历史记录详情文本列表（测试辅助）。"""
         return [label.text() for label in self._history_detail_labels]
+
+    def selected_image_count(self) -> int:
+        """返回当前已选择图片数量（测试辅助）。"""
+        return len(self._selected_image_paths)
+
+    def selected_image_paths(self) -> list[str]:
+        """返回当前已选择图片路径（测试辅助）。"""
+        return list(self._selected_image_paths)
+
+    def _refresh_selected_images_ui(self) -> None:
+        """刷新已选择图片预览条。"""
+        while self.selected_images_layout.count() > 0:
+            item = self.selected_images_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        if not self._selected_image_paths:
+            self.selected_images_container.setVisible(False)
+            self.selected_images_hint_label.setText("最多可添加 3 张图片")
+            return
+
+        self.selected_images_container.setVisible(True)
+        for index, image_path in enumerate(self._selected_image_paths):
+            chip = QWidget(self.selected_images_container)
+            chip.setStyleSheet("border:1px solid #CFD8DC; border-radius:4px; background:#FAFAFA;")
+            chip_layout = QHBoxLayout(chip)
+            chip_layout.setContentsMargins(6, 2, 6, 2)
+            chip_layout.setSpacing(4)
+            chip_label = QLabel(Path(image_path).name, chip)
+            chip_label.setStyleSheet("color:#37474F;")
+            remove_button = QPushButton("×", chip)
+            remove_button.setFixedSize(20, 20)
+            remove_button.clicked.connect(lambda _checked=False, idx=index: self._remove_selected_image(idx))
+            chip_layout.addWidget(chip_label)
+            chip_layout.addWidget(remove_button)
+            self.selected_images_layout.addWidget(chip, 0, Qt.AlignLeft)
+
+        self.selected_images_layout.addStretch(1)
+        self.selected_images_hint_label.setText(f"已选择 {len(self._selected_image_paths)}/3 张图片")
+        self._logger.debug("刷新图片预览完成，count=%s", len(self._selected_image_paths))
+
+    def _remove_selected_image(self, index: int) -> None:
+        """移除指定索引图片。"""
+        if index < 0 or index >= len(self._selected_image_paths):
+            return
+        removed = self._selected_image_paths.pop(index)
+        self._logger.debug("移除已选图片，index=%s, path=%s", index, removed)
+        self._refresh_selected_images_ui()
+
+    def _on_add_images_clicked(self) -> None:
+        """处理添加图片按钮点击。"""
+        file_paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "选择图片",
+            "",
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.webp *.gif)",
+        )
+        if not file_paths:
+            self._logger.debug("用户取消选择图片")
+            return
+        self._append_selected_images(file_paths)
+
+    def _append_selected_images(self, file_paths: list[str]) -> None:
+        """追加选择的图片路径，最多保留3张。"""
+        before_count = len(self._selected_image_paths)
+        blocked_count = 0
+        for file_path in file_paths:
+            normalized = str(Path(file_path))
+            if normalized in self._selected_image_paths:
+                continue
+            if len(self._selected_image_paths) >= 3:
+                blocked_count += 1
+                break
+            self._selected_image_paths.append(normalized)
+
+        if blocked_count > 0:
+            self._set_status("最多只能选择 3 张图片", is_error=True)
+        self._logger.debug(
+            "追加图片完成，before_count=%s, add_requested=%s, current_count=%s",
+            before_count,
+            len(file_paths),
+            len(self._selected_image_paths),
+        )
+        self._refresh_selected_images_ui()
+
+    def _on_clear_images_clicked(self) -> None:
+        """处理清空图片按钮点击。"""
+        self._selected_image_paths.clear()
+        self._refresh_selected_images_ui()
+        self._set_status("已清空已选图片")
+        self._logger.debug("用户已清空已选图片")
+
+    @staticmethod
+    def _encode_image_to_data_url(image_path: str) -> str:
+        """将图片文件编码为 data URL。"""
+        image_bytes = Path(image_path).read_bytes()
+        encoded = base64.b64encode(image_bytes).decode("utf-8")
+        mime_type = mimetypes.guess_type(image_path)[0] or "image/png"
+        return f"data:{mime_type};base64,{encoded}"
+
+    def _build_user_message_content(self, user_text: str) -> tuple[Any, str]:
+        """构建用户消息内容（纯文本或多模态）。"""
+        selected_paths = list(self._selected_image_paths)
+        if not selected_paths:
+            return user_text, user_text
+
+        content_parts: list[dict[str, Any]] = []
+        display_lines: list[str] = []
+        trimmed_text = user_text.strip()
+        if trimmed_text:
+            content_parts.append({"type": "text", "text": trimmed_text})
+            display_lines.append(trimmed_text)
+        image_names: list[str] = []
+        for image_path in selected_paths:
+            data_url = self._encode_image_to_data_url(image_path)
+            content_parts.append({"type": "image_url", "image_url": {"url": data_url}})
+            image_names.append(Path(image_path).name)
+        display_lines.append(f"[图片 {len(image_names)} 张] " + ", ".join(image_names))
+        display_text = "\n".join(display_lines).strip()
+        self._logger.debug(
+            "构建多模态消息完成，text_len=%s, image_count=%s",
+            len(trimmed_text),
+            len(image_names),
+        )
+        return content_parts, display_text
 
     @staticmethod
     def _to_single_line_preview(text: str, metrics: QFontMetrics, width: int = 220) -> str:
@@ -436,6 +592,8 @@ class ChatWindow(QWidget):
         self.send_button.setText("思考中..." if busy else "发送")
         self.input_edit.setEnabled(not busy)
         self.clear_input_button.setEnabled(not busy)
+        self.add_image_button.setEnabled(not busy)
+        self.clear_images_button.setEnabled(not busy)
         if busy:
             self._set_status(stage_text or "AI思考中")
 
@@ -480,9 +638,9 @@ class ChatWindow(QWidget):
 
     def _on_send_clicked(self) -> None:
         """处理发送按钮点击。"""
-        user_text = self.input_edit.toPlainText().strip()
-        if not user_text:
-            self._set_status("请输入对话内容后再发送", is_error=True)
+        user_text = self.input_edit.toPlainText()
+        if not user_text.strip() and not self._selected_image_paths:
+            self._set_status("请输入对话内容或选择图片后再发送", is_error=True)
             return
         if self._chat_pipeline is None:
             self._set_status("对话服务未配置，请先检查系统初始化", is_error=True)
@@ -492,14 +650,28 @@ class ChatWindow(QWidget):
             self._set_status("AI思考中，请勿重复发送", is_error=True)
             return
 
+        try:
+            user_content, display_text = self._build_user_message_content(user_text=user_text)
+        except Exception as exc:  # pragma: no cover - 文件读取等异常
+            self._logger.exception("构建用户消息失败")
+            self._set_status(f"图片处理失败：{exc}", is_error=True)
+            return
+
+        pending_message = {"role": "user", "content": user_content}
         message_payload = [
             self._build_system_message(),
             *self._chat_messages,
-            {"role": "user", "content": user_text},
+            pending_message,
         ]
-        self._pending_user_text = user_text
+        self._pending_user_message = pending_message
+        self._pending_user_display_text = display_text
         self._set_send_busy(True, "AI思考中")
-        self._logger.debug("开始发送对话请求，message_count=%s, user_len=%s", len(message_payload), len(user_text))
+        self._logger.debug(
+            "开始发送对话请求，message_count=%s, user_text_len=%s, image_count=%s",
+            len(message_payload),
+            len(user_text.strip()),
+            len(self._selected_image_paths),
+        )
         started = self._chat_pipeline.start_chat(
             messages=message_payload,
             on_stage=self._on_chat_stage,
@@ -507,7 +679,8 @@ class ChatWindow(QWidget):
             on_error=self._on_chat_error,
         )
         if not started:
-            self._pending_user_text = ""
+            self._pending_user_message = None
+            self._pending_user_display_text = ""
             self._set_send_busy(False)
             self._set_status("AI思考中，请勿重复发送", is_error=True)
 
@@ -517,20 +690,25 @@ class ChatWindow(QWidget):
 
     def _on_chat_success(self, assistant_text: str) -> None:
         """处理对话成功。"""
-        user_text = self._pending_user_text.strip()
-        if user_text:
-            self._chat_messages.append({"role": "user", "content": user_text})
-            self._append_chat_bubble("user", user_text)
+        if self._pending_user_message is not None:
+            self._chat_messages.append(self._pending_user_message)
+            if self._pending_user_display_text.strip():
+                self._append_chat_bubble("user", self._pending_user_display_text)
         self._chat_messages.append({"role": "assistant", "content": assistant_text})
         self._append_chat_bubble("assistant", assistant_text)
         self.input_edit.clear()
-        self._pending_user_text = ""
+        self._selected_image_paths.clear()
+        self._refresh_selected_images_ui()
+        self._pending_user_message = None
+        self._pending_user_display_text = ""
         self._set_send_busy(False)
         self._set_status("回复完成，可继续提问")
         self._logger.debug("对话成功，assistant_len=%s, total_message_count=%s", len(assistant_text), len(self._chat_messages))
 
     def _on_chat_error(self, code: str, message: str) -> None:
         """处理对话失败。"""
+        self._pending_user_message = None
+        self._pending_user_display_text = ""
         self._set_send_busy(False)
         self._set_status(f"[{code}] {message}", is_error=True)
         self._logger.error("对话失败，code=%s, message=%s", code, message)
@@ -538,8 +716,9 @@ class ChatWindow(QWidget):
     def _on_clear_clicked(self) -> None:
         """清空当前聊天展示内容。"""
         self._chat_messages.clear()
-        self._pending_user_text = ""
-        self.message_area_placeholder.setText("聊天气泡区域将在后续 Issue 完成。")
+        self._pending_user_message = None
+        self._pending_user_display_text = ""
+        self.message_area_placeholder.setText("聊天记录区")
         self.message_area_placeholder.setVisible(True)
         self._chat_bubbles.clear()
 
@@ -582,7 +761,7 @@ class _ChatPipelineLike(Protocol):
 
     def start_chat(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         on_stage,
         on_success,
         on_error,
