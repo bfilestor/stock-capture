@@ -100,7 +100,39 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
         def activateWindow(self) -> None:
             pass
 
+    class FakeOCRCompare(QDialog):
+        """OCR 对照窗口替身。"""
+
+        ai_parse_requested = Signal(str)
+
+        def __init__(
+            self,
+            _image_path: str,
+            _capture_type_name: str,
+            ocr_text: str,
+            _parent: object | None,
+        ) -> None:
+            super().__init__()
+            self.ocr_text = ocr_text
+            self.status = ""
+
+        def show(self) -> None:
+            pass
+
+        def activateWindow(self) -> None:
+            pass
+
+        def show_stage(self, stage_text: str) -> None:
+            self.status = stage_text
+
+        def allow_retry(self, message: str) -> None:
+            self.status = message
+
+        def mark_ai_complete(self, message: str) -> None:
+            self.status = message
+
     preview_instances: list[FakePreview] = []
+    compare_instances: list[FakeOCRCompare] = []
     overlay_instances: list[FakeOverlay] = []
     parse_records: list[tuple[int | None, str, str]] = []
 
@@ -113,18 +145,32 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
         def is_running(self) -> bool:
             return self.running
 
-        def start_analysis(
+        def start_ocr(
             self,
             image_path: str,
-            prompt: str,
             on_stage,
             on_success,
             on_error,
         ) -> bool:
             self.running = True
             on_stage("OCR识别中")
+            on_success("ocr文本")
+            self.running = False
+            return True
+
+        def start_ai(
+            self,
+            prompt: str,
+            ocr_text: str,
+            on_stage,
+            on_success,
+            on_error,
+        ) -> bool:
+            self.running = True
+            assert prompt == "模板"
+            assert ocr_text == "ocr文本-已修正"
             on_stage("AI分析中")
-            on_success("ocr文本", '{"ok":true}', '{"choices":[{"message":{"content":"{\\"ok\\":true}"}}]}')
+            on_success('{"ok":true}', '{"choices":[{"message":{"content":"{\\"ok\\":true}"}}]}')
             self.running = False
             return True
 
@@ -132,6 +178,16 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
         preview = FakePreview(image_path, capture_type_name, parent)
         preview_instances.append(preview)
         return preview
+
+    def compare_factory(
+        image_path: str,
+        capture_type_name: str,
+        ocr_text: str,
+        parent: object | None,
+    ) -> QDialog:
+        compare = FakeOCRCompare(image_path, capture_type_name, ocr_text, parent)
+        compare_instances.append(compare)
+        return compare
 
     def on_parse_requested(context) -> None:
         parse_records.append((context.capture_type_id, context.capture_type_name, context.image_path))
@@ -146,6 +202,7 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
         dialog_factory=FakeDialog,
         overlay_factory=overlay_factory,  # type: ignore[arg-type]
         preview_factory=preview_factory,
+        ocr_compare_factory=compare_factory,
         on_parse_requested=on_parse_requested,
         analysis_pipeline=FakePipeline(),  # type: ignore[arg-type]
     )
@@ -171,8 +228,13 @@ def test_ft_e3_s2_i1_01_预览重截与发送解析透传(
     overlay_instances[1].capture_completed.emit(image2)
     assert len(preview_instances) == 2
     preview_instances[-1].send_requested.emit(image2)
+    assert workflow.context.state == "ocr_editing"
+    assert len(compare_instances) == 1
+    assert compare_instances[-1].ocr_text == "ocr文本"
+    compare_instances[-1].ai_parse_requested.emit("ocr文本-已修正")
 
     assert workflow.context.state == "editing"
+    assert workflow.context.ocr_text == "ocr文本-已修正"
     assert parse_records[-1][0] is not None
     assert parse_records[-1][1] == "市场动态"
     assert parse_records[-1][2] == image2

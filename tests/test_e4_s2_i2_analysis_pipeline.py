@@ -43,9 +43,13 @@ class DummyAIService:
         self._error = error
         self._delay = delay
         self.call_count = 0
+        self.last_prompt = ""
+        self.last_ocr_text = ""
 
-    def run_ai_with_meta(self, _prompt: str, _ocr_text: str) -> AIRunResult:
+    def run_ai_with_meta(self, prompt: str, ocr_text: str) -> AIRunResult:
         self.call_count += 1
+        self.last_prompt = prompt
+        self.last_ocr_text = ocr_text
         if self._delay > 0:
             time.sleep(self._delay)
         if self._error is not None:
@@ -160,3 +164,48 @@ def test_ocr失败时不触发ai且可重试() -> None:
     )
     assert restarted is True
     loop_retry.exec()
+
+
+def test_ft_e4_s2_i2_02_ocr确认后再触发ai解析() -> None:
+    """功能测试：支持先 OCR、后 AI 的分段异步调用。"""
+    dummy_ocr = DummyOCRService(text="ocr-raw")
+    dummy_ai = DummyAIService(content='{"ok": true}')
+    pipeline = AnalysisPipelineService(
+        ocr_service=dummy_ocr,
+        ai_service=dummy_ai,
+        thread_pool=QThreadPool(),
+        max_retries=1,
+    )
+    ocr_stages: list[str] = []
+    ai_stages: list[str] = []
+    ocr_result: list[str] = []
+    ai_result: list[tuple[str, str]] = []
+
+    ocr_loop = _wait_loop()
+    started_ocr = pipeline.start_ocr(
+        image_path="dummy.png",
+        on_stage=lambda stage: ocr_stages.append(stage),
+        on_success=lambda text: (ocr_result.append(text), ocr_loop.quit()),
+        on_error=lambda _code, _message: ocr_loop.quit(),
+    )
+    assert started_ocr is True
+    ocr_loop.exec()
+
+    ai_loop = _wait_loop()
+    started_ai = pipeline.start_ai(
+        prompt="prompt-after-review",
+        ocr_text="ocr-edited",
+        on_stage=lambda stage: ai_stages.append(stage),
+        on_success=lambda ai, raw: (ai_result.append((ai, raw)), ai_loop.quit()),
+        on_error=lambda _code, _message: ai_loop.quit(),
+    )
+    assert started_ai is True
+    ai_loop.exec()
+
+    assert ocr_stages == ["OCR识别中"]
+    assert ocr_result == ["ocr-raw"]
+    assert ai_stages == ["AI分析中"]
+    assert len(ai_result) == 1
+    assert dummy_ai.last_prompt == "prompt-after-review"
+    assert dummy_ai.last_ocr_text == "ocr-edited"
+    assert pipeline.is_running() is False

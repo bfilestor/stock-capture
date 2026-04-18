@@ -17,6 +17,7 @@ from services.result_service import ResultService
 from ui.capture.capture_overlay import CaptureOverlay
 from ui.capture.capture_preview_dialog import CapturePreviewDialog
 from ui.capture.capture_type_selector_dialog import CaptureTypeSelectorDialog
+from ui.capture.ocr_compare_dialog import OCRCompareDialog
 from ui.result.result_confirm_dialog import ResultConfirmDialog
 from utils.error_presenter import to_error_view
 from utils.logging_config import get_logger
@@ -24,7 +25,7 @@ from workers.capture_context import CaptureContext
 
 
 class CaptureWorkflowService:
-    """负责截图入口选择与上下文维护。"""
+    """负责截图入口选择、OCR确认与 AI 解析上下文维护。"""
 
     def __init__(
         self,
@@ -33,6 +34,7 @@ class CaptureWorkflowService:
         dialog_factory: Callable[[list[dict], QWidget | None], QDialog] | None = None,
         overlay_factory: Callable[[QWidget | None], CaptureOverlay] | None = None,
         preview_factory: Callable[[str, str, QWidget | None], QDialog] | None = None,
+        ocr_compare_factory: Callable[[str, str, str, QWidget | None], QDialog] | None = None,
         result_dialog_factory: Callable[[str, str, str, QWidget | None], QDialog] | None = None,
         on_parse_requested: Callable[[CaptureContext], None] | None = None,
         analysis_pipeline: AnalysisPipelineService | None = None,
@@ -53,6 +55,14 @@ class CaptureWorkflowService:
                 image_path=image_path, capture_type_name=capture_type_name, parent=parent
             )
         )
+        self._ocr_compare_factory = ocr_compare_factory or (
+            lambda image_path, capture_type_name, ocr_text, parent: OCRCompareDialog(
+                image_path=image_path,
+                capture_type_name=capture_type_name,
+                ocr_text=ocr_text,
+                parent=parent,
+            )
+        )
         self._result_dialog_factory = result_dialog_factory or (
             lambda capture_type_name, ocr_text, ai_text, parent: ResultConfirmDialog(
                 capture_type_name=capture_type_name,
@@ -70,6 +80,7 @@ class CaptureWorkflowService:
         self.context = CaptureContext()
         self._overlay: CaptureOverlay | None = None
         self._preview_dialog: QDialog | None = None
+        self._ocr_compare_dialog: QDialog | None = None
         self._result_dialog: QDialog | None = None
 
     def request_start_capture_overlay(self) -> None:
@@ -150,6 +161,20 @@ class CaptureWorkflowService:
         self._preview_dialog.activateWindow()
         self._logger.debug("截图预览窗口已打开")
 
+    def _open_ocr_compare_dialog(self) -> None:
+        """打开 OCR 对照预览窗口。"""
+        self._ocr_compare_dialog = self._ocr_compare_factory(
+            self.context.image_path,
+            self.context.capture_type_name,
+            self.context.ocr_text,
+            self._parent,
+        )
+        if hasattr(self._ocr_compare_dialog, "ai_parse_requested"):
+            self._ocr_compare_dialog.ai_parse_requested.connect(self._on_ai_parse_requested)  # type: ignore[attr-defined]
+        self._ocr_compare_dialog.show()
+        self._ocr_compare_dialog.activateWindow()
+        self._logger.debug("OCR 对照窗口已打开")
+
     def _remove_temp_image(self) -> None:
         """删除当前临时截图。"""
         if not self.context.image_path:
@@ -164,11 +189,28 @@ class CaptureWorkflowService:
         self._logger.debug("收到重截请求，准备重新进入截图")
         self._remove_temp_image()
         self.context.image_path = ""
+        self.context.ocr_text = ""
+        self.context.ai_content = ""
+        self.context.ai_raw_response = ""
         self.context.state = "capturing"
         self.request_start_capture_overlay()
 
+    def _resolve_prompt_template(self) -> str:
+        """读取当前业务类型绑定的 Prompt 模板。"""
+        if self.context.capture_type_id is None:
+            self._logger.warning("读取 Prompt 失败：capture_type_id 为空")
+            return ""
+        capture_type = self._config_service.get_capture_type(self.context.capture_type_id)
+        prompt = str(capture_type.get("prompt_template", "")).strip()
+        self._logger.debug(
+            "读取 Prompt 完成，capture_type_id=%s, prompt_len=%s",
+            self.context.capture_type_id,
+            len(prompt),
+        )
+        return prompt
+
     def _on_send_requested(self, image_path: str) -> None:
-        """处理发送解析入口。"""
+        """处理发送解析入口：先执行 OCR。"""
         if self.context.capture_type_id is None:
             self._logger.warning("发送解析失败：capture_type_id 为空")
             return
@@ -176,8 +218,7 @@ class CaptureWorkflowService:
             self._show_preview_retry("解析进行中，请勿重复点击发送解析")
             return
 
-        capture_type = self._config_service.get_capture_type(self.context.capture_type_id)
-        prompt = str(capture_type.get("prompt_template", "")).strip()
+        prompt = self._resolve_prompt_template()
         if not prompt:
             self._show_preview_retry("当前业务类型未配置 PromptTemplate")
             return
@@ -186,63 +227,127 @@ class CaptureWorkflowService:
         self.context.state = "ocr_processing"
         self._show_preview_stage("OCR识别中")
 
-        started = self._analysis_pipeline.start_analysis(
+        started = self._analysis_pipeline.start_ocr(
             image_path=image_path,
-            prompt=prompt,
-            on_stage=self._on_pipeline_stage,
-            on_success=self._on_pipeline_success,
+            on_stage=self._on_ocr_stage,
+            on_success=self._on_ocr_success,
             on_error=self._on_pipeline_error,
         )
         if not started:
             self._show_preview_retry("解析进行中，请勿重复点击发送解析")
 
-    def _on_pipeline_stage(self, stage_text: str) -> None:
-        """处理异步阶段更新。"""
-        if stage_text == "OCR识别中":
-            self.context.state = "ocr_processing"
-        elif stage_text == "AI分析中":
-            self.context.state = "ai_processing"
+    def _on_ocr_stage(self, stage_text: str) -> None:
+        """处理 OCR 阶段更新。"""
+        self.context.state = "ocr_processing"
         self._show_preview_stage(stage_text)
 
-    def _on_pipeline_success(self, ocr_text: str, ai_content: str, ai_raw_text: str) -> None:
-        """处理解析成功。"""
+    def _on_ocr_success(self, ocr_text: str) -> None:
+        """OCR 完成后进入图片与 OCR 对照确认阶段。"""
         self.context.ocr_text = ocr_text
+        self.context.state = "ocr_editing"
+        self._show_preview_complete("OCR完成，请在对照窗口确认文本后再点击AI解析")
+        self._logger.debug("OCR 成功，ocr_len=%s，准备打开 OCR 对照窗口", len(ocr_text))
+        self._open_ocr_compare_dialog()
+
+    def _on_ai_parse_requested(self, edited_ocr_text: str) -> None:
+        """用户确认 OCR 文本后触发 AI 解析。"""
+        if self._analysis_pipeline.is_running():
+            self._show_ocr_compare_retry("解析进行中，请勿重复点击AI解析")
+            return
+        prompt = self._resolve_prompt_template()
+        if not prompt:
+            self._show_ocr_compare_retry("当前业务类型未配置 PromptTemplate")
+            return
+
+        ocr_text = edited_ocr_text.strip()
+        if not ocr_text:
+            self._show_ocr_compare_retry("OCR 文本不能为空")
+            return
+
+        self.context.ocr_text = ocr_text
+        self.context.state = "ai_processing"
+        self._show_ocr_compare_stage("AI分析中")
+        self._logger.debug("开始 AI 解析，ocr_len=%s", len(ocr_text))
+
+        started = self._analysis_pipeline.start_ai(
+            prompt=prompt,
+            ocr_text=ocr_text,
+            on_stage=self._on_ai_stage,
+            on_success=self._on_ai_success,
+            on_error=self._on_pipeline_error,
+        )
+        if not started:
+            self._show_ocr_compare_retry("解析进行中，请勿重复点击AI解析")
+
+    def _on_ai_stage(self, stage_text: str) -> None:
+        """处理 AI 阶段更新。"""
+        self.context.state = "ai_processing"
+        self._show_ocr_compare_stage(stage_text)
+
+    def _on_ai_success(self, ai_content: str, ai_raw_text: str) -> None:
+        """处理 AI 解析成功。"""
         self.context.ai_content = ai_content
         self.context.ai_raw_response = ai_raw_text
         self.context.state = "editing"
-        self._show_preview_complete("解析完成，准备进入结果确认")
+        self._show_ocr_compare_complete("AI解析完成，准备进入结果确认")
         self._open_result_dialog()
         if self._on_parse_requested is not None:
             self._on_parse_requested(self.context)
 
     def _on_pipeline_error(self, code: str, message: str) -> None:
-        """处理解析失败。"""
+        """统一处理 OCR/AI 阶段失败。"""
+        previous_state = self.context.state
         self.context.state = "failed"
         error_view = to_error_view(ServiceError(code, message))
         self._logger.error("解析失败，code=%s, raw_message=%s", error_view.code, error_view.raw_message)
-        self._show_preview_retry(error_view.to_ui_text())
+        error_text = error_view.to_ui_text()
+        if previous_state == "ai_processing":
+            self._show_ocr_compare_retry(error_text)
+            return
+        self._show_preview_retry(error_text)
 
     def _show_preview_stage(self, stage: str) -> None:
-        """更新预览窗口阶段提示。"""
+        """更新截图预览窗口阶段提示。"""
         if self._preview_dialog is not None and hasattr(self._preview_dialog, "show_stage"):
             self._preview_dialog.show_stage(stage)  # type: ignore[attr-defined]
 
     def _show_preview_retry(self, message: str) -> None:
-        """更新预览窗口为可重试状态。"""
+        """更新截图预览窗口为可重试状态。"""
         if self._preview_dialog is not None and hasattr(self._preview_dialog, "allow_retry"):
             self._preview_dialog.allow_retry(message)  # type: ignore[attr-defined]
         else:
             self._logger.warning(message)
 
     def _show_preview_complete(self, message: str) -> None:
-        """更新预览窗口完成提示。"""
+        """更新截图预览窗口完成提示。"""
         if self._preview_dialog is not None and hasattr(self._preview_dialog, "mark_send_complete"):
             self._preview_dialog.mark_send_complete(message)  # type: ignore[attr-defined]
         else:
             self._logger.debug(message)
 
+    def _show_ocr_compare_stage(self, stage: str) -> None:
+        """更新 OCR 对照窗口阶段提示。"""
+        if self._ocr_compare_dialog is not None and hasattr(self._ocr_compare_dialog, "show_stage"):
+            self._ocr_compare_dialog.show_stage(stage)  # type: ignore[attr-defined]
+
+    def _show_ocr_compare_retry(self, message: str) -> None:
+        """更新 OCR 对照窗口为可重试状态。"""
+        if self._ocr_compare_dialog is not None and hasattr(self._ocr_compare_dialog, "allow_retry"):
+            self._ocr_compare_dialog.allow_retry(message)  # type: ignore[attr-defined]
+        else:
+            self._logger.warning(message)
+
+    def _show_ocr_compare_complete(self, message: str) -> None:
+        """更新 OCR 对照窗口完成提示。"""
+        if self._ocr_compare_dialog is not None and hasattr(self._ocr_compare_dialog, "mark_ai_complete"):
+            self._ocr_compare_dialog.mark_ai_complete(message)  # type: ignore[attr-defined]
+        else:
+            self._logger.debug(message)
+
     def _open_result_dialog(self) -> None:
         """打开结果确认窗口。"""
+        if self._ocr_compare_dialog is not None:
+            self._ocr_compare_dialog.close()
         self._result_dialog = self._result_dialog_factory(
             self.context.capture_type_name,
             self.context.ocr_text,
