@@ -33,21 +33,38 @@ class OCRService(BaseService):
         data = image_file.read_bytes()
         return base64.b64encode(data).decode("utf-8")
 
+    @staticmethod
+    def _extract_text(data_field: object) -> str:
+        """从 Umi-OCR 返回体中提取文本，兼容字符串与对象结构。"""
+        if isinstance(data_field, str):
+            return data_field.strip()
+        if isinstance(data_field, dict):
+            return str(data_field.get("text", "")).strip()
+        return ""
+
     def run_ocr(self, image_path: str) -> str:
         """执行 OCR 并返回文本。"""
         url = f"{self._base_url}/api/ocr"
+        image_base64 = self._image_to_base64(image_path)
         payload: dict[str, Any] = {
-            "data": {
-                "format": "text",
-                "tbpu": {"parser": "single_line"},
-                "image": self._image_to_base64(image_path),
-            }
+            "base64": image_base64,
+            "options": {
+                "data.format": "text",
+                "tbpu.parser": "single_line",
+            },
         }
-        self.logger.debug("开始调用 Umi-OCR，url=%s, image_path=%s", url, image_path)
+        self.logger.debug(
+            "开始调用 Umi-OCR，url=%s, image_path=%s, base64_len=%s, options=%s",
+            url,
+            image_path,
+            len(image_base64),
+            payload["options"],
+        )
         try:
             response = httpx.post(url, json=payload, timeout=self._timeout_seconds)
-        except httpx.RequestError as exc:
-            self.logger.exception("Umi-OCR 连接失败")
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            self.logger.exception("Umi-OCR 调用失败")
             raise ServiceError("OCR_001", f"连接失败: {exc}") from exc
 
         try:
@@ -60,11 +77,10 @@ class OCRService(BaseService):
             self.logger.warning("OCR 返回码异常: %s", data)
             raise ServiceError("OCR_002", f"返回码异常: {data.get('code')}")
 
-        text = str(data.get("data", {}).get("text", "")).strip()
+        text = self._extract_text(data.get("data"))
         if not text:
-            self.logger.warning("OCR 返回空文本")
+            self.logger.warning("OCR 返回空文本，raw_data=%s", data.get("data"))
             raise ServiceError("OCR_003", "OCR 返回空文本")
 
         self.logger.debug("OCR 调用成功，文本长度=%s", len(text))
         return text
-

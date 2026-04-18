@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QImage
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QSizePolicy
 
 from db.database import DatabaseBootstrap
 from services.capture_workflow_service import CaptureWorkflowService
@@ -37,6 +37,15 @@ def _create_image_file(path: Path) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
     image = QImage(100, 80, QImage.Format_ARGB32)
     image.fill(0xFF33AA66)
+    assert image.save(str(path), "PNG")
+    return str(path)
+
+
+def _create_small_image_file(path: Path) -> str:
+    """生成小尺寸测试图片文件。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image = QImage(100, 20, QImage.Format_ARGB32)
+    image.fill(0xFF2E7D32)
     assert image.save(str(path), "PNG")
     return str(path)
 
@@ -176,6 +185,18 @@ def test_bt_e3_s2_i1_01_预览图文件缺失提示重截(app: QApplication, tmp
 
     assert dialog.send_button.isEnabled() is False
     assert "截图失效" in dialog.status_label.text()
+
+
+def test_bt_e3_s2_i1_03_小图预览尺寸策略避免自增长(
+    app: QApplication, tmp_path: Path
+) -> None:
+    """边界测试：小图预览应使用忽略尺寸提示策略，避免布局被 pixmap 反向放大。"""
+    image_path = _create_small_image_file(tmp_path / "small_preview.png")
+    dialog = CapturePreviewDialog(image_path, "市场动态")
+
+    policy = dialog.preview_label.sizePolicy()
+    assert policy.horizontalPolicy() == QSizePolicy.Ignored
+    assert policy.verticalPolicy() == QSizePolicy.Ignored
 
 
 def test_bt_e3_s2_i1_02_重截遵循延时启动(

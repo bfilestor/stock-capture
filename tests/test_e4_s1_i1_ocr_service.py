@@ -30,12 +30,19 @@ def test_ft_e4_s1_i1_01_ocr成功返回文本(
         """HTTP 响应替身。"""
 
         @staticmethod
+        def raise_for_status() -> None:
+            """模拟 HTTP 成功状态。"""
+            return None
+
+        @staticmethod
         def json() -> dict:
             return {"code": 100, "data": {"text": "识别成功文本"}}
 
     def fake_post(url: str, json: dict, timeout: float) -> FakeResponse:
         assert url.endswith("/api/ocr")
-        assert "image" in json["data"]
+        assert isinstance(json.get("base64"), str)
+        assert json["options"]["data.format"] == "text"
+        assert json["options"]["tbpu.parser"] == "single_line"
         assert timeout == 15.0
         return FakeResponse()
 
@@ -53,6 +60,11 @@ def test_bt_e4_s1_i1_01_ocr空文本映射ocr_003(
 
     class FakeResponse:
         """HTTP 响应替身。"""
+
+        @staticmethod
+        def raise_for_status() -> None:
+            """模拟 HTTP 成功状态。"""
+            return None
 
         @staticmethod
         def json() -> dict:
@@ -76,3 +88,25 @@ def test_ocr连接失败映射ocr_001(tmp_path: Path, monkeypatch: pytest.Monkey
     with pytest.raises(ServiceError, match="OCR_001"):
         service.run_ocr(image_path)
 
+
+def test_ft_e4_s1_i1_02_ocr字符串结果可兼容(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """功能测试：Umi-OCR data 为字符串时可正确提取。"""
+    image_path = _build_image(tmp_path / "ocr_text_data.png")
+
+    class FakeResponse:
+        """HTTP 响应替身。"""
+
+        @staticmethod
+        def raise_for_status() -> None:
+            """模拟 HTTP 成功状态。"""
+            return None
+
+        @staticmethod
+        def json() -> dict:
+            return {"code": 100, "data": "字符串识别结果"}
+
+    monkeypatch.setattr(httpx, "post", lambda *args, **kwargs: FakeResponse())
+    service = OCRService(base_url="http://127.0.0.1:1224")
+    assert service.run_ocr(image_path) == "字符串识别结果"

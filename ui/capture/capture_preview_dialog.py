@@ -6,7 +6,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+)
 
 from utils.logging_config import get_logger
 
@@ -28,6 +35,8 @@ class CapturePreviewDialog(QDialog):
         self._logger = get_logger(__name__)
         self._image_path = image_path
         self._capture_type_name = capture_type_name
+        self._source_pixmap: QPixmap | None = None
+        self._last_render_size: tuple[int, int] | None = None
         self.setWindowTitle("截图预览")
         self.resize(760, 520)
         self._init_ui()
@@ -41,6 +50,8 @@ class CapturePreviewDialog(QDialog):
 
         self.preview_label = QLabel(self)
         self.preview_label.setAlignment(Qt.AlignCenter)
+        # 忽略 pixmap 尺寸提示，避免 setPixmap 反向驱动布局持续放大。
+        self.preview_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.preview_label.setMinimumHeight(360)
         self.preview_label.setStyleSheet("border:1px solid #90A4AE; background:#F5F5F5;")
         layout.addWidget(self.preview_label, 1)
@@ -85,19 +96,41 @@ class CapturePreviewDialog(QDialog):
             self._logger.warning("预览文件读取失败: %s", self._image_path)
             return
 
-        scaled = pixmap.scaled(
-            self.preview_label.size(),
+        self._source_pixmap = pixmap
+        self._render_preview_pixmap()
+        self._set_status("预览加载成功")
+
+    def _render_preview_pixmap(self) -> None:
+        """按当前控件尺寸刷新预览图片。"""
+        if self._source_pixmap is None:
+            return
+        target_size = self.preview_label.contentsRect().size()
+        if target_size.width() <= 0 or target_size.height() <= 0:
+            return
+        scaled = self._source_pixmap.scaled(
+            target_size,
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation,
         )
+        rendered_size = (scaled.width(), scaled.height())
+        if self._last_render_size == rendered_size:
+            return
+        self._last_render_size = rendered_size
         self.preview_label.setPixmap(scaled)
-        self._set_status("预览加载成功")
+        self._logger.debug(
+            "刷新预览图，source=%sx%s,target=%sx%s,render=%sx%s",
+            self._source_pixmap.width(),
+            self._source_pixmap.height(),
+            target_size.width(),
+            target_size.height(),
+            scaled.width(),
+            scaled.height(),
+        )
 
     def resizeEvent(self, event) -> None:
         """窗口缩放时更新预览图尺寸。"""
         super().resizeEvent(event)
-        if self.preview_label.pixmap() is not None:
-            self._load_preview()
+        self._render_preview_pixmap()
 
     def _on_retake_clicked(self) -> None:
         """处理重截动作。"""
