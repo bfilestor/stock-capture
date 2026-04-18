@@ -114,3 +114,21 @@ def test_bt_e8_s2_i2_03_最多仅允许选择三张图片(app: QApplication, tmp
 
     dialog._append_selected_images(paths)  # type: ignore[attr-defined]
     assert dialog.selected_image_count() == 3
+
+
+def test_ft_e8_s2_i2_04_截图上传成功后加入待发送图片(app: QApplication, tmp_path: Path) -> None:
+    """功能测试：截图上传完成后应加入已选图片列表并参与后续发送。"""
+    pipeline = FakeChatPipeline(mode="success")
+    dialog = ChatWindow(chat_pipeline=pipeline)
+    screenshot_path = tmp_path / "shot.png"
+    screenshot_path.write_bytes(b"fake-shot-image")
+
+    dialog._on_capture_image_completed(str(screenshot_path))  # type: ignore[attr-defined]
+    assert dialog.selected_image_count() == 1
+    assert dialog.selected_image_paths()[0].endswith("shot.png")
+
+    dialog.input_edit.setPlainText("这是截图上传内容")
+    dialog.send_button.click()
+
+    assert pipeline.started_count == 1
+    assert isinstance(pipeline.last_messages[-1]["content"], list)

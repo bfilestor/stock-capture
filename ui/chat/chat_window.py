@@ -7,7 +7,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any, Protocol
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QFontMetrics, QTextCursor
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.capture.capture_overlay import CaptureOverlay
 from ui.chat.chat_message_bubble import ChatMessageBubble
 from utils.logging_config import get_logger
 
@@ -50,6 +51,8 @@ class ChatWindow(QWidget):
         self._chat_messages: list[dict[str, Any]] = []
         self._chat_bubbles: list[ChatMessageBubble] = []
         self._selected_image_paths: list[str] = []
+        self._chat_capture_overlay: CaptureOverlay | None = None
+        self._capture_restore_visible = False
         self._pending_user_message: dict[str, Any] | None = None
         self._pending_user_display_text = ""
         self.setWindowTitle("AI对话")
@@ -127,12 +130,16 @@ class ChatWindow(QWidget):
         self.add_image_button = QPushButton("添加图片", self)
         self.add_image_button.setMinimumHeight(28)
         self.add_image_button.clicked.connect(self._on_add_images_clicked)
+        self.capture_image_button = QPushButton("截图上传", self)
+        self.capture_image_button.setMinimumHeight(28)
+        self.capture_image_button.clicked.connect(self._on_capture_image_clicked)
         self.clear_images_button = QPushButton("清空图片", self)
         self.clear_images_button.setMinimumHeight(28)
         self.clear_images_button.clicked.connect(self._on_clear_images_clicked)
         self.selected_images_hint_label = QLabel("最多可添加 3 张图片", self)
         self.selected_images_hint_label.setStyleSheet("color:#607D8B;")
         image_toolbar_layout.addWidget(self.add_image_button)
+        image_toolbar_layout.addWidget(self.capture_image_button)
         image_toolbar_layout.addWidget(self.clear_images_button)
         image_toolbar_layout.addWidget(self.selected_images_hint_label)
         image_toolbar_layout.addStretch(1)
@@ -278,6 +285,55 @@ class ChatWindow(QWidget):
             self._logger.debug("用户取消选择图片")
             return
         self._append_selected_images(file_paths)
+
+    def _on_capture_image_clicked(self) -> None:
+        """处理截图上传按钮点击。"""
+        if len(self._selected_image_paths) >= 3:
+            self._set_status("最多只能选择 3 张图片", is_error=True)
+            return
+
+        self._capture_restore_visible = self.isVisible()
+        if self._capture_restore_visible:
+            self.hide()
+
+        self._logger.debug("开始截图上传流程，will_restore_visible=%s", self._capture_restore_visible)
+        # 延时启动截图遮罩，避免窗口残影被截入图片。
+        QTimer.singleShot(150, self._start_capture_overlay_for_chat)
+
+    def _start_capture_overlay_for_chat(self) -> None:
+        """启动聊天窗口截图遮罩。"""
+        overlay = CaptureOverlay(parent=None, mask_alpha=0)
+        overlay.capture_completed.connect(self._on_capture_image_completed)
+        overlay.capture_cancelled.connect(self._on_capture_image_cancelled)
+        overlay.capture_error.connect(self._on_capture_image_error)
+        self._chat_capture_overlay = overlay
+        overlay.showFullScreen()
+        overlay.activateWindow()
+        self._logger.debug("截图遮罩已打开")
+
+    def _restore_chat_window_after_capture(self) -> None:
+        """截图流程结束后恢复聊天窗口显示状态。"""
+        if self._capture_restore_visible:
+            self.show()
+            self.raise_()
+            self.activateWindow()
+        self._capture_restore_visible = False
+
+    def _on_capture_image_completed(self, image_path: str) -> None:
+        """处理截图完成并加入上传列表。"""
+        self._logger.debug("截图上传完成，image_path=%s", image_path)
+        self._append_selected_images([image_path])
+        self._restore_chat_window_after_capture()
+
+    def _on_capture_image_cancelled(self) -> None:
+        """处理截图取消。"""
+        self._logger.debug("截图上传已取消")
+        self._restore_chat_window_after_capture()
+
+    def _on_capture_image_error(self, message: str) -> None:
+        """处理截图失败。"""
+        self._set_status(message, is_error=True)
+        self._logger.warning("截图上传失败：%s", message)
 
     def _append_selected_images(self, file_paths: list[str]) -> None:
         """追加选择的图片路径，最多保留3张。"""
@@ -593,6 +649,7 @@ class ChatWindow(QWidget):
         self.input_edit.setEnabled(not busy)
         self.clear_input_button.setEnabled(not busy)
         self.add_image_button.setEnabled(not busy)
+        self.capture_image_button.setEnabled(not busy)
         self.clear_images_button.setEnabled(not busy)
         if busy:
             self._set_status(stage_text or "AI思考中")
