@@ -10,6 +10,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from db.database import DatabaseBootstrap
+from services.chat_window_manager import ChatWindowManager
 from services.capture_workflow_service import CaptureWorkflowService
 from services.config_service import ConfigService
 from services.result_service import ResultService
@@ -63,8 +64,10 @@ def bootstrap() -> QApplication:
         result_service=result_service,
         overlay_start_delay_ms=overlay_delay_ms,
     )
+    chat_window_manager = ChatWindowManager()
     setattr(app, "_settings_window", settings_window)
     setattr(app, "_capture_workflow", capture_workflow)
+    setattr(app, "_chat_window_manager", chat_window_manager)
 
     def show_settings_window() -> None:
         """显示设置窗口。"""
@@ -87,10 +90,16 @@ def bootstrap() -> QApplication:
         else:
             logger.warning("截图入口未继续：%s", message)
 
-    # 创建托盘管理器并绑定默认动作，具体业务窗口在后续 Issue 落地。
+    def show_chat_window() -> None:
+        """显示单实例对话窗口。"""
+        logger.debug("打开对话窗口")
+        chat_window_manager.show_chat_window()
+
+    # 创建托盘管理器并绑定默认动作。
     tray_manager = TrayManager(app)
     tray_manager.bind_events(
         on_capture=start_capture_flow,
+        on_chat=show_chat_window,
         on_settings=show_settings_window,
         on_exit=lambda: logger.info("收到退出请求，开始安全退出"),
     )

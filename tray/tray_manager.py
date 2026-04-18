@@ -26,10 +26,12 @@ class TrayManager:
         self._menu: QMenu | None = None
         self._tray_icon: QSystemTrayIcon | None = None
         self._capture_action: QAction | None = None
+        self._chat_action: QAction | None = None
         self._settings_action: QAction | None = None
         self._exit_action: QAction | None = None
 
         self._on_capture: Callable[[], None] = lambda: None
+        self._on_chat: Callable[[], None] = lambda: None
         self._on_settings: Callable[[], None] = lambda: None
         self._on_exit: Callable[[], None] = lambda: None
         self._exit_handled = False
@@ -70,9 +72,10 @@ class TrayManager:
         return QIcon()
 
     def _build_menu(self) -> QMenu:
-        """构建固定三项菜单。"""
+        """构建固定四项菜单。"""
         menu = QMenu()
         self._capture_action = menu.addAction("截图")
+        self._chat_action = menu.addAction("对话")
         self._settings_action = menu.addAction("设置")
         self._exit_action = menu.addAction("退出")
         self._logger.debug("托盘菜单创建完成，菜单项=%s", [a.text() for a in menu.actions()])
@@ -81,11 +84,13 @@ class TrayManager:
     def bind_events(
         self,
         on_capture: Callable[[], None],
+        on_chat: Callable[[], None],
         on_settings: Callable[[], None],
         on_exit: Callable[[], None],
     ) -> None:
         """绑定托盘菜单动作回调。"""
         self._on_capture = on_capture
+        self._on_chat = on_chat
         self._on_settings = on_settings
         self._on_exit = on_exit
         self._logger.debug("托盘动作回调绑定完成")
@@ -99,6 +104,11 @@ class TrayManager:
         """处理“设置”动作。"""
         self._logger.debug("点击托盘菜单：设置")
         self._on_settings()
+
+    def _handle_chat(self) -> None:
+        """处理“对话”动作。"""
+        self._logger.debug("点击托盘菜单：对话")
+        self._on_chat()
 
     def _handle_exit(self) -> None:
         """处理“退出”动作，并保证幂等。"""
@@ -125,10 +135,12 @@ class TrayManager:
         self._menu = self._build_menu()
 
         assert self._capture_action is not None
+        assert self._chat_action is not None
         assert self._settings_action is not None
         assert self._exit_action is not None
 
         self._capture_action.triggered.connect(self._handle_capture)
+        self._chat_action.triggered.connect(self._handle_chat)
         self._settings_action.triggered.connect(self._handle_settings)
         self._exit_action.triggered.connect(self._handle_exit)
 

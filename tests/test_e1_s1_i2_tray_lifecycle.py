@@ -47,27 +47,29 @@ def app() -> QApplication:
 
 
 def test_ft_e1_s1_i2_01_托盘菜单动作可触发(app: QApplication) -> None:
-    """功能测试：托盘菜单固定三项且动作可触发。"""
-    events = {"capture": 0, "settings": 0, "exit": 0}
+    """功能测试：托盘菜单固定四项且动作可触发。"""
+    events = {"capture": 0, "chat": 0, "settings": 0, "exit": 0}
     fake_tray_icon = FakeTrayIcon()
 
     manager = TrayManager(app, tray_icon_factory=lambda _app: fake_tray_icon)
     manager.bind_events(
         on_capture=lambda: events.__setitem__("capture", events["capture"] + 1),
+        on_chat=lambda: events.__setitem__("chat", events["chat"] + 1),
         on_settings=lambda: events.__setitem__("settings", events["settings"] + 1),
         on_exit=lambda: events.__setitem__("exit", events["exit"] + 1),
     )
     manager.initialize()
 
     actions = manager.menu_actions()
-    assert [action.text() for action in actions] == ["截图", "设置", "退出"]
+    assert [action.text() for action in actions] == ["截图", "对话", "设置", "退出"]
 
-    capture_action, settings_action, exit_action = actions
+    capture_action, chat_action, settings_action, exit_action = actions
     capture_action.trigger()
+    chat_action.trigger()
     settings_action.trigger()
     exit_action.trigger()
 
-    assert events == {"capture": 1, "settings": 1, "exit": 1}
+    assert events == {"capture": 1, "chat": 1, "settings": 1, "exit": 1}
     assert fake_tray_icon.show_count == 1
     assert fake_tray_icon.hide_count == 1
     assert fake_tray_icon.delete_count == 1
@@ -81,15 +83,16 @@ def test_bt_e1_s1_i2_01_重复触发退出保持幂等(app: QApplication) -> Non
     manager = TrayManager(app, tray_icon_factory=lambda _app: fake_tray_icon)
     manager.bind_events(
         on_capture=lambda: None,
+        on_chat=lambda: None,
         on_settings=lambda: None,
         on_exit=lambda: exit_calls.__setitem__("count", exit_calls["count"] + 1),
     )
     manager.initialize()
 
     actions = manager.menu_actions()
-    assert len(actions) == 3
+    assert len(actions) == 4
 
-    exit_action = actions[2]
+    exit_action = actions[3]
     exit_action.trigger()
     exit_action.trigger()
 
