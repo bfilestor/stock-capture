@@ -28,10 +28,11 @@ class AnalysisHistoryService(BaseService):
             return normalized
         return normalized[: max_length - 3] + "..."
 
-    def list_recent_results(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_recent_results(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """查询最近历史结果并补充摘要字段。"""
         safe_limit = max(1, min(int(limit), 500))
-        rows = self._dao.list_recent(limit=safe_limit)
+        safe_offset = max(0, int(offset))
+        rows = self._dao.list_recent(limit=safe_limit, offset=safe_offset)
         result: list[dict[str, Any]] = []
         for row in rows:
             final_json_text = str(row.get("final_json_text", ""))
@@ -41,5 +42,17 @@ class AnalysisHistoryService(BaseService):
                     "summary": self._build_summary(final_json_text),
                 }
             )
-        self.logger.debug("历史结果读取完成，limit=%s, count=%s", safe_limit, len(result))
+        self.logger.debug(
+            "历史结果读取完成，limit=%s, offset=%s, count=%s",
+            safe_limit,
+            safe_offset,
+            len(result),
+        )
         return result
+
+    def delete_result(self, result_id: int) -> bool:
+        """删除指定历史分析结果。"""
+        affected = self._dao.delete_by_id(result_id=int(result_id))
+        deleted = affected > 0
+        self.logger.debug("删除历史结果完成，result_id=%s, deleted=%s", result_id, deleted)
+        return deleted

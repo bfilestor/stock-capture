@@ -107,8 +107,8 @@ class AnalysisResultDAO(BaseDAO):
             row = connection.execute(sql, (result_date, capture_type_id)).fetchone()
             return dict(row) if row else None
 
-    def list_recent(self, limit: int = 100) -> list[dict[str, Any]]:
-        """按更新时间倒序查询历史分析结果。"""
+    def list_recent(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
+        """按更新时间倒序分页查询历史分析结果。"""
         sql = """
         SELECT
           ar.id,
@@ -125,9 +125,27 @@ class AnalysisResultDAO(BaseDAO):
         LEFT JOIN capture_types ct ON ct.id = ar.capture_type_id
         ORDER BY ar.updated_at DESC, ar.id DESC
         LIMIT ?
+        OFFSET ?
         """
+        safe_limit = max(1, int(limit))
+        safe_offset = max(0, int(offset))
         with self.transaction() as connection:
             connection.row_factory = sqlite3.Row
-            rows = connection.execute(sql, (max(1, int(limit)),)).fetchall()
-            self._logger.debug("查询历史分析结果完成，limit=%s, count=%s", limit, len(rows))
+            rows = connection.execute(sql, (safe_limit, safe_offset)).fetchall()
+            self._logger.debug(
+                "查询历史分析结果完成，limit=%s, offset=%s, count=%s",
+                safe_limit,
+                safe_offset,
+                len(rows),
+            )
             return [dict(row) for row in rows]
+
+    def delete_by_id(self, result_id: int) -> int:
+        """按主键删除分析结果并返回影响行数。"""
+        sql = """
+        DELETE FROM analysis_results
+        WHERE id = ?
+        """
+        affected = self.execute_write(sql, (int(result_id),))
+        self._logger.debug("删除分析结果完成，id=%s, affected=%s", result_id, affected)
+        return affected

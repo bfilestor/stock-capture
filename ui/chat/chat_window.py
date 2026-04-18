@@ -9,6 +9,7 @@ from PySide6.QtGui import QFontMetrics, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTextEdit,
@@ -35,9 +36,13 @@ class ChatWindow(QWidget):
         self._history_service = history_service
         self._chat_pipeline = chat_pipeline
         self._history_import_buttons: list[QPushButton] = []
+        self._history_delete_buttons: list[QPushButton] = []
         self._history_detail_toggle_buttons: list[QPushButton] = []
         self._history_summary_labels: list[QLabel] = []
         self._history_detail_labels: list[QLabel] = []
+        self._history_page_size = 10
+        self._history_current_offset = 0
+        self._history_has_more = False
         self._chat_messages: list[dict[str, str]] = []
         self._chat_bubbles: list[ChatMessageBubble] = []
         self._pending_user_text = ""
@@ -73,6 +78,11 @@ class ChatWindow(QWidget):
         self.history_scroll_layout.addStretch(1)
         self.history_scroll_area.setWidget(self.history_scroll_content)
         history_layout.addWidget(self.history_scroll_area, 1)
+        self.history_load_more_button = QPushButton("加载更多", self.history_panel)
+        self.history_load_more_button.setMinimumHeight(28)
+        self.history_load_more_button.setVisible(False)
+        self.history_load_more_button.clicked.connect(self._on_load_more_clicked)
+        history_layout.addWidget(self.history_load_more_button, 0, Qt.AlignHCenter)
         root_layout.addWidget(self.history_panel, 0)
 
         right_panel = QWidget(self)
@@ -156,6 +166,10 @@ class ChatWindow(QWidget):
         """返回历史记录引入按钮列表（测试辅助）。"""
         return list(self._history_import_buttons)
 
+    def history_delete_buttons(self) -> list[QPushButton]:
+        """返回历史记录删除按钮列表（测试辅助）。"""
+        return list(self._history_delete_buttons)
+
     def history_item_expanded_states(self) -> list[bool]:
         """返回历史记录详情展开状态列表（测试辅助）。"""
         # 这里使用 isHidden，避免窗口未 show 时 isVisible 始终为 False 导致测试误判。
@@ -184,6 +198,7 @@ class ChatWindow(QWidget):
     def _clear_history_records(self) -> None:
         """清空历史记录列表组件。"""
         self._history_import_buttons.clear()
+        self._history_delete_buttons.clear()
         self._history_detail_toggle_buttons.clear()
         self._history_summary_labels.clear()
         self._history_detail_labels.clear()
@@ -193,31 +208,69 @@ class ChatWindow(QWidget):
             if widget is not None:
                 widget.deleteLater()
 
-    def _reload_history_records(self) -> None:
+    def _remove_history_layout_tail_stretch(self) -> None:
+        """移除历史列表尾部的 stretch，便于继续追加记录。"""
+        count = self.history_scroll_layout.count()
+        if count <= 0:
+            return
+        last_item = self.history_scroll_layout.itemAt(count - 1)
+        if last_item is not None and last_item.spacerItem() is not None:
+            self.history_scroll_layout.takeAt(count - 1)
+
+    def _reload_history_records(self, reset: bool = True) -> None:
         """刷新历史记录显示。"""
-        self._clear_history_records()
+        if reset:
+            self._clear_history_records()
+            self._history_current_offset = 0
+            self._history_has_more = False
+
         records: list[dict[str, Any]] = []
         if self._history_service is not None:
             try:
-                records = list(self._history_service.list_recent_results(limit=100))
+                records = list(
+                    self._history_service.list_recent_results(
+                        limit=self._history_page_size,
+                        offset=self._history_current_offset,
+                    )
+                )
             except Exception:  # pragma: no cover - 防御性兜底
                 self._logger.exception("历史记录加载失败")
                 records = []
 
-        if not records:
+        if reset and not records:
             self.history_empty_label = QLabel("暂无历史分析结果", self.history_scroll_content)
             self.history_empty_label.setWordWrap(True)
             self.history_empty_label.setStyleSheet("color:#607D8B;")
             self.history_scroll_layout.addWidget(self.history_empty_label)
             self.history_scroll_layout.addStretch(1)
+            self.history_load_more_button.setVisible(False)
             self._logger.debug("历史记录为空，显示空态")
             return
 
+        self._remove_history_layout_tail_stretch()
         for index, record in enumerate(records):
-            is_latest = index == 0
+            is_latest = reset and index == 0
             self.history_scroll_layout.addWidget(self._build_history_item(record, expanded=is_latest))
         self.history_scroll_layout.addStretch(1)
-        self._logger.debug("历史记录刷新完成，count=%s", len(records))
+
+        self._history_current_offset += len(records)
+        self._history_has_more = len(records) == self._history_page_size
+        self.history_load_more_button.setVisible(self._history_has_more)
+        self._logger.debug(
+            "历史记录刷新完成，added=%s, current_offset=%s, has_more=%s",
+            len(records),
+            self._history_current_offset,
+            self._history_has_more,
+        )
+
+    def _on_load_more_clicked(self) -> None:
+        """点击加载更多历史记录。"""
+        if not self._history_has_more:
+            self.history_load_more_button.setVisible(False)
+            self._logger.debug("加载更多被忽略：当前无更多数据")
+            return
+        self._logger.debug("开始加载更多历史记录，current_offset=%s", self._history_current_offset)
+        self._reload_history_records(reset=False)
 
     def _set_history_item_expanded(self, target_index: int, expanded: bool) -> None:
         """设置历史详情展开状态；展开时自动收起其他项。"""
@@ -279,7 +332,21 @@ class ChatWindow(QWidget):
         import_button.clicked.connect(
             lambda _checked=False, text=str(record.get("final_json_text", "")): self._import_history_text(text)
         )
-        layout.addWidget(import_button, 0, Qt.AlignRight)
+        delete_button = QPushButton("删除", container)
+        delete_button.clicked.connect(
+            lambda _checked=False, result_id=int(record.get("id", 0)), title=title.text(): self._on_delete_history_clicked(
+                result_id=result_id,
+                record_title=title,
+            )
+        )
+        action_row = QHBoxLayout()
+        action_row.setContentsMargins(0, 0, 0, 0)
+        action_row.setSpacing(6)
+        action_row.addStretch(1)
+        action_row.addWidget(delete_button)
+        action_row.addWidget(import_button)
+        layout.addLayout(action_row)
+        self._history_delete_buttons.append(delete_button)
         self._history_import_buttons.append(import_button)
 
         detail_toggle_button.clicked.connect(
@@ -289,6 +356,46 @@ class ChatWindow(QWidget):
         )
         self._set_history_item_expanded(detail_index, expanded)
         return container
+
+    def _confirm_delete_history_record(self, record_title: str) -> bool:
+        """确认是否删除历史记录。"""
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定删除这条历史分析结果吗？\n{record_title}",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        confirmed = reply == QMessageBox.Yes
+        self._logger.debug("删除确认结果，record_title=%s, confirmed=%s", record_title, confirmed)
+        return confirmed
+
+    def _on_delete_history_clicked(self, result_id: int, record_title: str) -> None:
+        """处理历史记录删除按钮点击。"""
+        if result_id <= 0:
+            self._set_status("删除失败：记录ID无效", is_error=True)
+            self._logger.warning("删除历史记录失败：无效ID=%s", result_id)
+            return
+        if self._history_service is None:
+            self._set_status("删除失败：历史服务未配置", is_error=True)
+            self._logger.warning("删除历史记录失败：history_service为空")
+            return
+        if not self._confirm_delete_history_record(record_title):
+            self._set_status("已取消删除")
+            return
+        try:
+            deleted = bool(self._history_service.delete_result(result_id))
+        except Exception:  # pragma: no cover - 防御性兜底
+            self._logger.exception("删除历史记录异常，id=%s", result_id)
+            self._set_status("删除失败，请稍后重试", is_error=True)
+            return
+        if not deleted:
+            self._set_status("删除失败：记录不存在或已被删除", is_error=True)
+            self._logger.warning("删除历史记录失败：记录不存在，id=%s", result_id)
+            return
+        self._set_status("历史记录删除成功")
+        self._logger.debug("历史记录删除成功，id=%s", result_id)
+        self._reload_history_records(reset=True)
 
     def _import_history_text(self, text: str) -> None:
         """将历史结果文本引入输入框。"""
@@ -460,8 +567,11 @@ class ChatWindow(QWidget):
 class _HistoryServiceLike(Protocol):
     """历史服务协议，便于窗口依赖注入。"""
 
-    def list_recent_results(self, limit: int = 100) -> list[dict[str, Any]]:
+    def list_recent_results(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """返回历史结果列表。"""
+
+    def delete_result(self, result_id: int) -> bool:
+        """删除历史结果。"""
 
 
 class _ChatPipelineLike(Protocol):

@@ -146,3 +146,106 @@ def test_bt_e8_s2_i1_02_历史内容预览压缩为单行(app: QApplication, tmp
     assert len(preview_text) < len(" ".join(long_json.splitlines()))
     assert detail_text == long_json
     assert "\n" in detail_text
+
+
+def test_ft_e8_s2_i1_03_历史记录默认10条并可加载更多(app: QApplication, tmp_path: Path) -> None:
+    """功能测试：历史区默认展示最新10条，点击加载更多再加载10条。"""
+    db_path = tmp_path / "stock_capture.db"
+    DatabaseBootstrap(db_path).initialize()
+    config_service = ConfigService(db_path)
+    dao = AnalysisResultDAO(db_path)
+    capture_type_id = config_service.create_capture_type(
+        CaptureTypePayload(name="分页测试类型", prompt_template="模板P", is_enabled=True)
+    )
+    for idx in range(12):
+        day = idx + 1
+        date_text = f"2026-04-{day:02d}"
+        dao.upsert_result(
+            result_date=date_text,
+            capture_type_id=capture_type_id,
+            image_path=f"{day}.png",
+            ocr_text=f"ocr-{day}",
+            ai_raw_response=f"raw-{day}",
+            final_json_text=f'{{"idx":{day}}}',
+            now_text=f"{date_text} 10:00:00",
+        )
+
+    dialog = ChatWindow(history_service=AnalysisHistoryService(db_path))
+    dialog.toggle_history_button.click()
+
+    assert dialog.history_record_count() == 10
+    assert dialog.history_load_more_button.isHidden() is False
+    assert '{"idx":12}' in dialog.history_item_detail_texts()[0]
+
+    dialog.history_load_more_button.click()
+    assert dialog.history_record_count() == 12
+    assert dialog.history_load_more_button.isHidden() is True
+
+
+def test_ft_e8_s2_i1_04_删除历史记录前需确认_确认后删除(app: QApplication, tmp_path: Path) -> None:
+    """功能测试：点击删除并确认后，记录应被删除并刷新列表。"""
+    db_path = tmp_path / "stock_capture.db"
+    DatabaseBootstrap(db_path).initialize()
+    config_service = ConfigService(db_path)
+    dao = AnalysisResultDAO(db_path)
+    capture_type_id = config_service.create_capture_type(
+        CaptureTypePayload(name="删除测试类型", prompt_template="模板DEL", is_enabled=True)
+    )
+    dao.upsert_result(
+        result_date="2026-04-17",
+        capture_type_id=capture_type_id,
+        image_path="a.png",
+        ocr_text="ocr-a",
+        ai_raw_response="raw-a",
+        final_json_text='{"a":1}',
+        now_text="2026-04-17 10:00:00",
+    )
+    dao.upsert_result(
+        result_date="2026-04-18",
+        capture_type_id=capture_type_id,
+        image_path="b.png",
+        ocr_text="ocr-b",
+        ai_raw_response="raw-b",
+        final_json_text='{"b":2}',
+        now_text="2026-04-18 10:00:00",
+    )
+    history_service = AnalysisHistoryService(db_path)
+    dialog = ChatWindow(history_service=history_service)
+    dialog.toggle_history_button.click()
+    assert dialog.history_record_count() == 2
+
+    dialog._confirm_delete_history_record = lambda _title: True  # type: ignore[method-assign]
+    dialog.history_delete_buttons()[0].click()
+
+    assert dialog.history_record_count() == 1
+    assert len(history_service.list_recent_results(limit=10)) == 1
+
+
+def test_bt_e8_s2_i1_03_删除确认取消后不删除(app: QApplication, tmp_path: Path) -> None:
+    """边界测试：删除确认取消时，不应删除任何记录。"""
+    db_path = tmp_path / "stock_capture.db"
+    DatabaseBootstrap(db_path).initialize()
+    config_service = ConfigService(db_path)
+    dao = AnalysisResultDAO(db_path)
+    capture_type_id = config_service.create_capture_type(
+        CaptureTypePayload(name="取消删除类型", prompt_template="模板CANCEL", is_enabled=True)
+    )
+    dao.upsert_result(
+        result_date="2026-04-18",
+        capture_type_id=capture_type_id,
+        image_path="c.png",
+        ocr_text="ocr-c",
+        ai_raw_response="raw-c",
+        final_json_text='{"c":3}',
+        now_text="2026-04-18 10:00:00",
+    )
+    history_service = AnalysisHistoryService(db_path)
+    dialog = ChatWindow(history_service=history_service)
+    dialog.toggle_history_button.click()
+    assert dialog.history_record_count() == 1
+
+    dialog._confirm_delete_history_record = lambda _title: False  # type: ignore[method-assign]
+    dialog.history_delete_buttons()[0].click()
+
+    assert dialog.history_record_count() == 1
+    assert len(history_service.list_recent_results(limit=10)) == 1
