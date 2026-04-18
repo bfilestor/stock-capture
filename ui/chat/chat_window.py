@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ui.chat.chat_message_bubble import ChatMessageBubble
 from utils.logging_config import get_logger
 
 
@@ -34,19 +35,19 @@ class ChatWindow(QWidget):
         self._chat_pipeline = chat_pipeline
         self._history_import_buttons: list[QPushButton] = []
         self._chat_messages: list[dict[str, str]] = []
+        self._chat_bubbles: list[ChatMessageBubble] = []
         self._pending_user_text = ""
         self.setWindowTitle("AI对话")
-        self.resize(960, 640)
+        self.resize(980, 680)
         self._init_ui()
         self._logger.debug("ChatWindow 初始化完成")
 
     def _init_ui(self) -> None:
-        """构建左右布局与基础交互控件。"""
+        """构建左右布局与交互控件。"""
         root_layout = QHBoxLayout(self)
         root_layout.setContentsMargins(12, 12, 12, 12)
         root_layout.setSpacing(12)
 
-        # 左侧历史面板：默认收起，后续 issue 再补真实数据渲染。
         self.history_panel = QWidget(self)
         self.history_panel.setObjectName("historyPanel")
         self.history_panel.setMinimumWidth(260)
@@ -55,23 +56,21 @@ class ChatWindow(QWidget):
         history_layout.setContentsMargins(10, 10, 10, 10)
         history_layout.addWidget(QLabel("历史AI分析结果", self.history_panel))
 
-        self.history_empty_label = QLabel("暂无历史分析结果", self.history_panel)
-        self.history_empty_label.setWordWrap(True)
-        self.history_empty_label.setStyleSheet("color:#607D8B;")
-
         self.history_scroll_area = QScrollArea(self.history_panel)
         self.history_scroll_area.setWidgetResizable(True)
         self.history_scroll_content = QWidget(self.history_scroll_area)
         self.history_scroll_layout = QVBoxLayout(self.history_scroll_content)
         self.history_scroll_layout.setContentsMargins(0, 0, 0, 0)
         self.history_scroll_layout.setSpacing(8)
+        self.history_empty_label = QLabel("暂无历史分析结果", self.history_scroll_content)
+        self.history_empty_label.setWordWrap(True)
+        self.history_empty_label.setStyleSheet("color:#607D8B;")
         self.history_scroll_layout.addWidget(self.history_empty_label)
         self.history_scroll_layout.addStretch(1)
         self.history_scroll_area.setWidget(self.history_scroll_content)
         history_layout.addWidget(self.history_scroll_area, 1)
         root_layout.addWidget(self.history_panel, 0)
 
-        # 右侧对话区：当前提供输入/发送/清空占位。
         right_panel = QWidget(self)
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(0, 0, 0, 0)
@@ -84,12 +83,23 @@ class ChatWindow(QWidget):
         toolbar_layout.addStretch(1)
         right_layout.addLayout(toolbar_layout)
 
-        self.message_area_placeholder = QLabel("聊天气泡区域将在后续 Issue 完成。", self)
+        self.message_scroll_area = QScrollArea(self)
+        self.message_scroll_area.setWidgetResizable(True)
+        self.message_scroll_content = QWidget(self.message_scroll_area)
+        self.message_scroll_layout = QVBoxLayout(self.message_scroll_content)
+        self.message_scroll_layout.setContentsMargins(6, 6, 6, 6)
+        self.message_scroll_layout.setSpacing(10)
+        self.message_area_placeholder = QLabel("聊天气泡区域将在后续 Issue 完成。", self.message_scroll_content)
         self.message_area_placeholder.setObjectName("chatMessageAreaPlaceholder")
-        self.message_area_placeholder.setStyleSheet("border:1px solid #CFD8DC; padding:10px;")
-        self.message_area_placeholder.setMinimumHeight(360)
+        self.message_area_placeholder.setStyleSheet(
+            "border:1px solid #CFD8DC; padding:10px; color:#607D8B;"
+        )
         self.message_area_placeholder.setAlignment(Qt.AlignTop | Qt.AlignLeft)
-        right_layout.addWidget(self.message_area_placeholder, 1)
+        self.message_area_placeholder.setWordWrap(True)
+        self.message_scroll_layout.addWidget(self.message_area_placeholder)
+        self.message_scroll_layout.addStretch(1)
+        self.message_scroll_area.setWidget(self.message_scroll_content)
+        right_layout.addWidget(self.message_scroll_area, 1)
 
         self.input_edit = QTextEdit(self)
         self.input_edit.setPlaceholderText("请输入要与 AI 对话的内容...")
@@ -120,8 +130,7 @@ class ChatWindow(QWidget):
 
     def toggle_history_panel(self) -> None:
         """切换左侧历史面板展开状态。"""
-        next_state = not self._history_expanded
-        self._set_history_expanded(next_state)
+        self._set_history_expanded(not self._history_expanded)
 
     def _set_history_expanded(self, expanded: bool) -> None:
         """设置左侧历史面板显隐与按钮文案。"""
@@ -170,8 +179,7 @@ class ChatWindow(QWidget):
             return
 
         for record in records:
-            item_widget = self._build_history_item(record)
-            self.history_scroll_layout.addWidget(item_widget)
+            self.history_scroll_layout.addWidget(self._build_history_item(record))
         self.history_scroll_layout.addStretch(1)
         self._logger.debug("历史记录刷新完成，count=%s", len(records))
 
@@ -182,24 +190,16 @@ class ChatWindow(QWidget):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(4)
-
-        title = QLabel(
-            f"{record.get('result_date', '')} · {record.get('capture_type_name', '')}",
-            container,
-        )
+        title = QLabel(f"{record.get('result_date', '')} · {record.get('capture_type_name', '')}", container)
         title.setStyleSheet("font-weight:600;")
         layout.addWidget(title)
-
         summary = QLabel(str(record.get("summary", "")), container)
         summary.setWordWrap(True)
         summary.setStyleSheet("color:#455A64;")
         layout.addWidget(summary)
-
         import_button = QPushButton("引入", container)
         import_button.clicked.connect(
-            lambda _checked=False, text=str(record.get("final_json_text", "")): self._import_history_text(
-                text
-            )
+            lambda _checked=False, text=str(record.get("final_json_text", "")): self._import_history_text(text)
         )
         layout.addWidget(import_button, 0, Qt.AlignRight)
         self._history_import_buttons.append(import_button)
@@ -234,7 +234,7 @@ class ChatWindow(QWidget):
             self._set_status(stage_text or "AI思考中")
 
     def _append_message_to_placeholder(self, role: str, text: str) -> None:
-        """将消息附加到占位消息区。"""
+        """维护占位文本，兼容早期测试断言。"""
         current_text = self.message_area_placeholder.text().strip()
         lines: list[str] = []
         if current_text and "后续 Issue 完成" not in current_text:
@@ -242,6 +242,35 @@ class ChatWindow(QWidget):
         prefix = "你" if role == "user" else "AI"
         lines.append(f"{prefix}：{text}")
         self.message_area_placeholder.setText("\n\n".join(lines))
+
+    def _append_chat_bubble(self, role: str, text: str) -> None:
+        """在消息区追加左右气泡。"""
+        bubble = ChatMessageBubble(role=role, text=text, parent=self.message_scroll_content)
+        row_container = QWidget(self.message_scroll_content)
+        row_layout = QHBoxLayout(row_container)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(0)
+        if role == "user":
+            row_layout.addStretch(1)
+            row_layout.addWidget(bubble, 0, Qt.AlignRight)
+        else:
+            row_layout.addWidget(bubble, 0, Qt.AlignLeft)
+            row_layout.addStretch(1)
+        # 始终插入在 stretch 之前，保持消息顺序。
+        insert_index = max(0, self.message_scroll_layout.count() - 1)
+        self.message_scroll_layout.insertWidget(insert_index, row_container)
+        self._chat_bubbles.append(bubble)
+        self.message_area_placeholder.setVisible(False)
+        self._append_message_to_placeholder(role, text)
+        self._logger.debug("追加消息气泡，role=%s, text_len=%s", role, len(text))
+
+    def message_bubbles(self) -> list[ChatMessageBubble]:
+        """返回消息气泡列表（测试辅助）。"""
+        return list(self._chat_bubbles)
+
+    def message_bubble_count(self) -> int:
+        """返回消息气泡数量（测试辅助）。"""
+        return len(self._chat_bubbles)
 
     def _on_send_clicked(self) -> None:
         """处理发送按钮点击。"""
@@ -257,7 +286,11 @@ class ChatWindow(QWidget):
             self._set_status("AI思考中，请勿重复发送", is_error=True)
             return
 
-        message_payload = [self._build_system_message(), *self._chat_messages, {"role": "user", "content": user_text}]
+        message_payload = [
+            self._build_system_message(),
+            *self._chat_messages,
+            {"role": "user", "content": user_text},
+        ]
         self._pending_user_text = user_text
         self._set_send_busy(True, "AI思考中")
         self._logger.debug("开始发送对话请求，message_count=%s, user_len=%s", len(message_payload), len(user_text))
@@ -281,9 +314,9 @@ class ChatWindow(QWidget):
         user_text = self._pending_user_text.strip()
         if user_text:
             self._chat_messages.append({"role": "user", "content": user_text})
-            self._append_message_to_placeholder("user", user_text)
+            self._append_chat_bubble("user", user_text)
         self._chat_messages.append({"role": "assistant", "content": assistant_text})
-        self._append_message_to_placeholder("assistant", assistant_text)
+        self._append_chat_bubble("assistant", assistant_text)
         self.input_edit.clear()
         self._pending_user_text = ""
         self._set_send_busy(False)
@@ -301,6 +334,19 @@ class ChatWindow(QWidget):
         self._chat_messages.clear()
         self._pending_user_text = ""
         self.message_area_placeholder.setText("聊天气泡区域将在后续 Issue 完成。")
+        self.message_area_placeholder.setVisible(True)
+        self._chat_bubbles.clear()
+
+        # 删除现有消息行，仅保留占位和尾部 stretch。
+        while self.message_scroll_layout.count() > 0:
+            item = self.message_scroll_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                if widget is self.message_area_placeholder:
+                    continue
+                widget.deleteLater()
+        self.message_scroll_layout.addWidget(self.message_area_placeholder)
+        self.message_scroll_layout.addStretch(1)
         self._set_status("聊天内容已清空")
         self._logger.debug("用户已清空聊天内容")
 
