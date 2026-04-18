@@ -21,13 +21,20 @@ from utils.logging_config import get_logger
 class ChatWindow(QWidget):
     """托盘对话入口窗口。"""
 
-    def __init__(self, history_service: "_HistoryServiceLike | None" = None) -> None:
+    def __init__(
+        self,
+        history_service: "_HistoryServiceLike | None" = None,
+        chat_pipeline: "_ChatPipelineLike | None" = None,
+    ) -> None:
         """初始化对话窗口。"""
         super().__init__()
         self._logger = get_logger(__name__)
         self._history_expanded = False
         self._history_service = history_service
+        self._chat_pipeline = chat_pipeline
         self._history_import_buttons: list[QPushButton] = []
+        self._chat_messages: list[dict[str, str]] = []
+        self._pending_user_text = ""
         self.setWindowTitle("AI对话")
         self.resize(960, 640)
         self._init_ui()
@@ -97,8 +104,14 @@ class ChatWindow(QWidget):
         action_layout.addWidget(self.send_button)
         right_layout.addLayout(action_layout)
 
+        self.status_label = QLabel("请输入问题后点击发送", self)
+        self.status_label.setWordWrap(True)
+        right_layout.addWidget(self.status_label)
+
         root_layout.addWidget(right_panel, 1)
         self._set_history_expanded(False)
+        self.send_button.clicked.connect(self._on_send_clicked)
+        self.clear_button.clicked.connect(self._on_clear_clicked)
         self._logger.debug("对话窗口 UI 初始化完成，history_expanded=%s", self._history_expanded)
 
     def is_history_expanded(self) -> bool:
@@ -198,9 +211,118 @@ class ChatWindow(QWidget):
         self.input_edit.setFocus()
         self._logger.debug("历史记录已引入输入框，text_len=%s", len(text))
 
+    @staticmethod
+    def _build_system_message() -> dict[str, str]:
+        """构建系统提示。"""
+        return {
+            "role": "system",
+            "content": "你是A股复盘助手，请基于用户输入给出清晰、可执行的分析建议。",
+        }
+
+    def _set_status(self, message: str, is_error: bool = False) -> None:
+        """更新底部状态提示。"""
+        color = "#B00020" if is_error else "#1565C0"
+        self.status_label.setStyleSheet(f"color:{color};")
+        self.status_label.setText(message)
+
+    def _set_send_busy(self, busy: bool, stage_text: str = "") -> None:
+        """更新发送忙碌状态。"""
+        self.send_button.setEnabled(not busy)
+        self.send_button.setText("思考中..." if busy else "发送")
+        self.input_edit.setEnabled(not busy)
+        if busy:
+            self._set_status(stage_text or "AI思考中")
+
+    def _append_message_to_placeholder(self, role: str, text: str) -> None:
+        """将消息附加到占位消息区。"""
+        current_text = self.message_area_placeholder.text().strip()
+        lines: list[str] = []
+        if current_text and "后续 Issue 完成" not in current_text:
+            lines.append(current_text)
+        prefix = "你" if role == "user" else "AI"
+        lines.append(f"{prefix}：{text}")
+        self.message_area_placeholder.setText("\n\n".join(lines))
+
+    def _on_send_clicked(self) -> None:
+        """处理发送按钮点击。"""
+        user_text = self.input_edit.toPlainText().strip()
+        if not user_text:
+            self._set_status("请输入对话内容后再发送", is_error=True)
+            return
+        if self._chat_pipeline is None:
+            self._set_status("对话服务未配置，请先检查系统初始化", is_error=True)
+            self._logger.warning("发送失败：对话管线未配置")
+            return
+        if self._chat_pipeline.is_running():
+            self._set_status("AI思考中，请勿重复发送", is_error=True)
+            return
+
+        message_payload = [self._build_system_message(), *self._chat_messages, {"role": "user", "content": user_text}]
+        self._pending_user_text = user_text
+        self._set_send_busy(True, "AI思考中")
+        self._logger.debug("开始发送对话请求，message_count=%s, user_len=%s", len(message_payload), len(user_text))
+        started = self._chat_pipeline.start_chat(
+            messages=message_payload,
+            on_stage=self._on_chat_stage,
+            on_success=self._on_chat_success,
+            on_error=self._on_chat_error,
+        )
+        if not started:
+            self._pending_user_text = ""
+            self._set_send_busy(False)
+            self._set_status("AI思考中，请勿重复发送", is_error=True)
+
+    def _on_chat_stage(self, stage_text: str) -> None:
+        """处理对话阶段更新。"""
+        self._set_send_busy(True, stage_text)
+
+    def _on_chat_success(self, assistant_text: str) -> None:
+        """处理对话成功。"""
+        user_text = self._pending_user_text.strip()
+        if user_text:
+            self._chat_messages.append({"role": "user", "content": user_text})
+            self._append_message_to_placeholder("user", user_text)
+        self._chat_messages.append({"role": "assistant", "content": assistant_text})
+        self._append_message_to_placeholder("assistant", assistant_text)
+        self.input_edit.clear()
+        self._pending_user_text = ""
+        self._set_send_busy(False)
+        self._set_status("回复完成，可继续提问")
+        self._logger.debug("对话成功，assistant_len=%s, total_message_count=%s", len(assistant_text), len(self._chat_messages))
+
+    def _on_chat_error(self, code: str, message: str) -> None:
+        """处理对话失败。"""
+        self._set_send_busy(False)
+        self._set_status(f"[{code}] {message}", is_error=True)
+        self._logger.error("对话失败，code=%s, message=%s", code, message)
+
+    def _on_clear_clicked(self) -> None:
+        """清空当前聊天展示内容。"""
+        self._chat_messages.clear()
+        self._pending_user_text = ""
+        self.message_area_placeholder.setText("聊天气泡区域将在后续 Issue 完成。")
+        self._set_status("聊天内容已清空")
+        self._logger.debug("用户已清空聊天内容")
+
 
 class _HistoryServiceLike(Protocol):
     """历史服务协议，便于窗口依赖注入。"""
 
     def list_recent_results(self, limit: int = 100) -> list[dict[str, Any]]:
         """返回历史结果列表。"""
+
+
+class _ChatPipelineLike(Protocol):
+    """对话管线协议，便于窗口依赖注入。"""
+
+    def is_running(self) -> bool:
+        """返回是否存在运行中对话任务。"""
+
+    def start_chat(
+        self,
+        messages: list[dict[str, str]],
+        on_stage,
+        on_success,
+        on_error,
+    ) -> bool:
+        """启动对话任务。"""

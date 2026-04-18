@@ -11,6 +11,8 @@ from PySide6.QtWidgets import QApplication
 
 from db.database import DatabaseBootstrap
 from services.analysis_history_service import AnalysisHistoryService
+from services.chat_pipeline_service import ChatPipelineService
+from services.chat_service import ChatService
 from services.chat_window_manager import ChatWindowManager
 from services.capture_workflow_service import CaptureWorkflowService
 from services.config_service import ConfigService
@@ -50,6 +52,8 @@ def bootstrap() -> QApplication:
     config_service = ConfigService(db_bootstrap.db_path)
     result_service = ResultService(db_bootstrap.db_path)
     analysis_history_service = AnalysisHistoryService(db_bootstrap.db_path)
+    chat_service = ChatService(config_service)
+    chat_pipeline = ChatPipelineService(chat_service=chat_service)
     settings_window = SettingsWindow(config_service)
 
     def handle_parse_requested(context) -> None:
@@ -68,7 +72,10 @@ def bootstrap() -> QApplication:
         overlay_start_delay_ms=overlay_delay_ms,
     )
     chat_window_manager = ChatWindowManager(
-        window_factory=lambda: ChatWindow(history_service=analysis_history_service)
+        window_factory=lambda: ChatWindow(
+            history_service=analysis_history_service,
+            chat_pipeline=chat_pipeline,
+        )
     )
     setattr(app, "_settings_window", settings_window)
     setattr(app, "_capture_workflow", capture_workflow)
