@@ -291,6 +291,21 @@ class ConfigService(BaseService):
         return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
     @staticmethod
+    def _build_chat_url(base_url: str) -> str:
+        """拼接 chat/completions 请求地址。"""
+        normalized = base_url.rstrip("/")
+        if normalized.endswith("/v1"):
+            return f"{normalized}/chat/completions"
+        return f"{normalized}/v1/chat/completions"
+
+    def _resolve_default_enabled_model_for_provider(self, provider_id: int) -> dict[str, Any] | None:
+        """解析指定供应商的默认且启用模型。"""
+        enabled_models = self._model_dao.list_enabled_by_provider(provider_id)
+        if not enabled_models:
+            return None
+        return next((row for row in enabled_models if int(row.get("is_default", 0)) == 1), None)
+
+    @staticmethod
     def mask_api_key(api_key: str) -> str:
         """掩码显示 API Key。"""
         plain = api_key.strip()
@@ -308,7 +323,7 @@ class ConfigService(BaseService):
         return provider
 
     def test_provider_connection(self, provider_id: int, timeout_seconds: float = 8.0) -> dict[str, str]:
-        """测试供应商连通性并返回标准结果。"""
+        """测试供应商连接与模型可用性并返回标准结果。"""
         provider = self.get_provider(provider_id)
         base_url = str(provider.get("api_base_url", "")).strip()
         api_key = str(provider.get("api_key", "")).strip()
@@ -316,22 +331,67 @@ class ConfigService(BaseService):
         if not self.is_valid_base_url(base_url):
             raise ConfigValidationError("Base URL 格式非法")
 
-        models_url = f"{base_url.rstrip('/')}/models"
-        headers = {"Accept": "application/json"}
+        default_model = self._resolve_default_enabled_model_for_provider(provider_id)
+        if default_model is None:
+            self.logger.warning("连接测试失败：未配置默认启用模型，provider_id=%s", provider_id)
+            return {"code": "AI_003", "message": "请先为该供应商配置默认且启用的模型"}
+
+        model_code = str(default_model.get("model_code", "")).strip()
+        chat_url = self._build_chat_url(base_url)
+        headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
+        payload = {
+            "model": model_code,
+            "messages": [
+                {"role": "system", "content": "你是连接测试助手，请严格只回复ok。"},
+                {"role": "user", "content": "请只回复ok"},
+            ],
+        }
 
-        self.logger.debug("开始测试连接，provider_id=%s, url=%s", provider_id, models_url)
+        self.logger.debug(
+            "开始测试连接，provider_id=%s, model=%s, url=%s",
+            provider_id,
+            model_code,
+            chat_url,
+        )
         try:
-            response = httpx.get(models_url, headers=headers, timeout=timeout_seconds)
-            if 200 <= response.status_code < 300:
-                self.logger.debug("连接测试成功，status=%s", response.status_code)
-                return {"code": "OK", "message": "连接成功"}
+            response = httpx.post(
+                chat_url,
+                headers=headers,
+                json=payload,
+                timeout=timeout_seconds,
+            )
             if response.status_code in {401, 403}:
                 self.logger.warning("连接测试认证失败，status=%s", response.status_code)
                 return {"code": "AI_002", "message": f"认证失败({response.status_code})"}
-            self.logger.warning("连接测试返回异常状态，status=%s", response.status_code)
-            return {"code": "AI_001", "message": f"连接失败({response.status_code})"}
+            if response.status_code >= 400:
+                self.logger.warning("连接测试返回异常状态，status=%s", response.status_code)
+                return {"code": "AI_001", "message": f"请求失败({response.status_code})"}
+
+            try:
+                raw_response = response.json()
+            except Exception as exc:
+                self.logger.exception("连接测试返回非JSON")
+                return {"code": "AI_003", "message": f"响应解析失败: {exc}"}
+
+            choices = raw_response.get("choices")
+            if not isinstance(choices, list) or not choices:
+                self.logger.warning("连接测试返回结构异常：choices为空")
+                return {"code": "AI_003", "message": "返回结构异常：choices为空"}
+
+            message = choices[0].get("message", {})
+            content = str(message.get("content", "")).strip()
+            if not content:
+                self.logger.warning("连接测试返回结构异常：content为空")
+                return {"code": "AI_003", "message": "返回结构异常：content为空"}
+
+            if "ok" in content.lower():
+                self.logger.debug("连接测试成功：模型回复命中ok")
+                return {"code": "OK", "message": "模型回复包含ok"}
+
+            self.logger.warning("连接测试失败：模型回复未包含ok，content=%s", content)
+            return {"code": "AI_003", "message": f"模型回复未包含ok，实际回复：{content}"}
         except httpx.RequestError as exc:
             self.logger.exception("连接测试请求失败")
             return {"code": "AI_001", "message": f"连接失败: {exc}"}

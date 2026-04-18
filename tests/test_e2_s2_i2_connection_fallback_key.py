@@ -43,16 +43,33 @@ def test_ft_e2_s2_i2_01_测试连接成功(
             is_default=True,
         )
     )
+    config_service.create_model(
+        provider_id,
+        AIModelPayload(
+            model_code="gpt-test",
+            model_name="测试模型",
+            is_enabled=True,
+            is_default=True,
+        ),
+    )
 
-    def fake_get(url: str, headers: dict[str, str], timeout: float) -> httpx.Response:
-        assert url == "https://api.example.com/v1/models"
+    def fake_post(url: str, headers: dict[str, str], json: dict, timeout: float) -> httpx.Response:
+        assert url == "https://api.example.com/v1/chat/completions"
         assert "Authorization" in headers
+        assert json["model"] == "gpt-test"
+        assert json["messages"][0]["role"] == "system"
+        assert "只回复ok" in json["messages"][0]["content"]
         assert timeout == 8.0
-        return httpx.Response(status_code=200, request=httpx.Request("GET", url))
+        return httpx.Response(
+            status_code=200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": "ok"}}]},
+        )
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "post", fake_post)
     result = config_service.test_provider_connection(provider_id)
     assert result["code"] == "OK"
+    assert "ok" in result["message"].lower()
 
 
 def test_bt_e2_s2_i2_01_base_url非法不发起请求(
@@ -69,12 +86,48 @@ def test_bt_e2_s2_i2_01_base_url非法不发起请求(
         )
     )
 
-    def fake_get(url: str, headers: dict[str, str], timeout: float) -> httpx.Response:
+    def fake_post(url: str, headers: dict[str, str], json: dict, timeout: float) -> httpx.Response:
         raise AssertionError("非法 URL 不应发起请求")
 
-    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(httpx, "post", fake_post)
     with pytest.raises(ConfigValidationError, match="Base URL 格式非法"):
         config_service.test_provider_connection(provider_id)
+
+
+def test_bt_e2_s2_i2_02_模型回复不含ok返回失败原因(
+    monkeypatch: pytest.MonkeyPatch, config_service: ConfigService
+) -> None:
+    """边界测试：模型回复不包含 ok 时测试失败并返回原因。"""
+    provider_id = config_service.create_provider(
+        AIProviderPayload(
+            name="OpenAI-Compatible",
+            api_base_url="https://api.example.com/v1",
+            api_key="sk-test",
+            is_enabled=True,
+            is_default=True,
+        )
+    )
+    config_service.create_model(
+        provider_id,
+        AIModelPayload(
+            model_code="gpt-test",
+            model_name="测试模型",
+            is_enabled=True,
+            is_default=True,
+        ),
+    )
+
+    def fake_post(url: str, headers: dict[str, str], json: dict, timeout: float) -> httpx.Response:
+        return httpx.Response(
+            status_code=200,
+            request=httpx.Request("POST", url),
+            json={"choices": [{"message": {"content": "连接正常"}}]},
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    result = config_service.test_provider_connection(provider_id)
+    assert result["code"] == "AI_003"
+    assert "未包含ok" in result["message"]
 
 
 def test_default_provider_fallback_to_first_enabled(config_service: ConfigService) -> None:
@@ -132,4 +185,3 @@ def test_api_key_default_hidden_and_can_toggle(app: QApplication, config_service
     assert tab.provider_key_edit.echoMode() == QLineEdit.Normal
     tab.toggle_key_visibility()
     assert tab.provider_key_edit.echoMode() == QLineEdit.Password
-

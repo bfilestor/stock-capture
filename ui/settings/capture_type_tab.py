@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QCheckBox,
-    QFormLayout,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -67,35 +67,40 @@ class CaptureTypeTab(QWidget):
         self.enabled_checkbox = QCheckBox("启用", self)
         self.enabled_checkbox.setChecked(True)
 
-        form = QFormLayout()
-        form.addRow("业务类型名称*", self.name_edit)
-        form.addRow("描述", self.description_edit)
-        form.addRow("状态", self.enabled_checkbox)
-        form_layout.addLayout(form)
+        # 统一采用两列表单布局，保证标签列与输入列对齐一致。
+        form_grid = QGridLayout()
+        form_grid.setContentsMargins(0, 0, 0, 0)
+        form_grid.setHorizontalSpacing(8)
+        form_grid.setVerticalSpacing(6)
 
-        prompt_system_splitter = QSplitter(Qt.Vertical, form_container)
-        prompt_system_splitter.setChildrenCollapsible(False)
+        name_label = QLabel("业务类型名称*", form_container)
+        desc_label = QLabel("描述", form_container)
+        status_label = QLabel("状态", form_container)
+        prompt_label = QLabel("PromptTemplate*", form_container)
+        system_prompt_label = QLabel("SystemPrompt", form_container)
+        for label in [name_label, desc_label, status_label, prompt_label, system_prompt_label]:
+            label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
 
-        prompt_container = QWidget(prompt_system_splitter)
-        prompt_layout = QVBoxLayout(prompt_container)
-        prompt_layout.setContentsMargins(0, 0, 0, 0)
-        prompt_layout.setSpacing(6)
-        prompt_layout.addWidget(QLabel("PromptTemplate*", prompt_container))
-        prompt_layout.addWidget(self.prompt_edit, 1)
+        form_grid.addWidget(name_label, 0, 0)
+        form_grid.addWidget(self.name_edit, 0, 1)
+        form_grid.addWidget(desc_label, 1, 0)
+        form_grid.addWidget(self.description_edit, 1, 1)
+        form_grid.addWidget(status_label, 2, 0)
+        form_grid.addWidget(self.enabled_checkbox, 2, 1)
+        form_grid.addWidget(prompt_label, 3, 0, alignment=Qt.AlignTop | Qt.AlignRight)
+        form_grid.addWidget(self.prompt_edit, 3, 1)
+        form_grid.addWidget(system_prompt_label, 4, 0, alignment=Qt.AlignTop | Qt.AlignRight)
+        form_grid.addWidget(self.system_prompt_edit, 4, 1)
 
-        system_prompt_container = QWidget(prompt_system_splitter)
-        system_prompt_layout = QVBoxLayout(system_prompt_container)
-        system_prompt_layout.setContentsMargins(0, 0, 0, 0)
-        system_prompt_layout.setSpacing(6)
-        system_prompt_layout.addWidget(QLabel("SystemPrompt", system_prompt_container))
-        system_prompt_layout.addWidget(self.system_prompt_edit, 1)
-
-        prompt_system_splitter.addWidget(prompt_container)
-        prompt_system_splitter.addWidget(system_prompt_container)
-        prompt_system_splitter.setStretchFactor(0, 1)
-        prompt_system_splitter.setStretchFactor(1, 1)
-        prompt_system_splitter.setSizes([1, 1])
-        form_layout.addWidget(prompt_system_splitter, 1)
+        form_grid.setColumnStretch(0, 0)
+        form_grid.setColumnStretch(1, 1)
+        # 让 PromptTemplate / SystemPrompt 平分右侧剩余高度。
+        form_grid.setRowStretch(0, 0)
+        form_grid.setRowStretch(1, 0)
+        form_grid.setRowStretch(2, 0)
+        form_grid.setRowStretch(3, 1)
+        form_grid.setRowStretch(4, 1)
+        form_layout.addLayout(form_grid, 1)
 
         button_layout = QHBoxLayout()
         self.new_button = QPushButton("新增", self)
@@ -109,7 +114,6 @@ class CaptureTypeTab(QWidget):
         self.status_label = QLabel("准备就绪", self)
         self.status_label.setWordWrap(True)
         form_layout.addWidget(self.status_label)
-        form_layout.addStretch(1)
 
         splitter.addWidget(form_container)
         splitter.setSizes([280, 620])
