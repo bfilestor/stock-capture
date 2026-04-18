@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFontMetrics, QTextCursor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -163,6 +164,18 @@ class ChatWindow(QWidget):
         """返回历史记录展开按钮列表（测试辅助）。"""
         return list(self._history_detail_toggle_buttons)
 
+    def history_item_preview_texts(self) -> list[str]:
+        """返回历史记录预览文本列表（测试辅助）。"""
+        return [label.text() for label in self._history_detail_labels]
+
+    @staticmethod
+    def _to_single_line_preview(text: str, metrics: QFontMetrics, width: int = 220) -> str:
+        """将文本压缩为单行预览并在超长时省略。"""
+        normalized = " ".join(str(text).splitlines()).strip()
+        if not normalized:
+            return "(空内容)"
+        return metrics.elidedText(normalized, Qt.ElideRight, width)
+
     def _clear_history_records(self) -> None:
         """清空历史记录列表组件。"""
         self._history_import_buttons.clear()
@@ -221,14 +234,20 @@ class ChatWindow(QWidget):
         layout.addLayout(title_row)
 
         summary = QLabel(str(record.get("summary", "")), container)
-        summary.setWordWrap(True)
+        summary_metrics = QFontMetrics(summary.font())
+        summary.setWordWrap(False)
+        summary.setText(self._to_single_line_preview(str(record.get("summary", "")), summary_metrics))
         summary.setStyleSheet("color:#455A64;")
+        summary.setFixedHeight(summary_metrics.height() + 6)
         layout.addWidget(summary)
 
         detail_label = QLabel(str(record.get("final_json_text", "")), container)
-        detail_label.setWordWrap(True)
+        detail_metrics = QFontMetrics(detail_label.font())
+        detail_label.setWordWrap(False)
+        detail_label.setText(self._to_single_line_preview(str(record.get("final_json_text", "")), detail_metrics))
         detail_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        detail_label.setStyleSheet("color:#263238; background:#ECEFF1; border-radius:4px; padding:6px;")
+        detail_label.setStyleSheet("color:#263238; background:#ECEFF1; border-radius:4px; padding:4px 6px;")
+        detail_label.setFixedHeight(detail_metrics.height() + 10)
         layout.addWidget(detail_label)
         self._history_detail_labels.append(detail_label)
 
@@ -256,9 +275,22 @@ class ChatWindow(QWidget):
 
     def _import_history_text(self, text: str) -> None:
         """将历史结果文本引入输入框。"""
-        self.input_edit.setPlainText(text)
+        existing_text = self.input_edit.toPlainText()
+        new_text = text
+        if existing_text.strip():
+            separator = "" if existing_text.endswith("\n") else "\n"
+            new_text = f"{existing_text}{separator}{text}"
+        self.input_edit.setPlainText(new_text)
+        cursor = self.input_edit.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.input_edit.setTextCursor(cursor)
         self.input_edit.setFocus()
-        self._logger.debug("历史记录已引入输入框，text_len=%s", len(text))
+        self._logger.debug(
+            "历史记录已追加到输入框，existing_len=%s, append_len=%s, new_len=%s",
+            len(existing_text),
+            len(text),
+            len(new_text),
+        )
 
     @staticmethod
     def _build_system_message() -> dict[str, str]:

@@ -88,3 +88,58 @@ def test_bt_e8_s2_i1_01_无历史记录时显示空态(app: QApplication, tmp_pa
 
     assert dialog.history_record_count() == 0
     assert "暂无历史分析结果" in dialog.history_empty_label.text()
+
+
+def test_ft_e8_s2_i1_02_引入历史内容为追加而非覆盖(app: QApplication, tmp_path: Path) -> None:
+    """功能测试：点击引入时应追加到输入框末尾，不覆盖原有文本。"""
+    db_path = tmp_path / "stock_capture.db"
+    DatabaseBootstrap(db_path).initialize()
+    config_service = ConfigService(db_path)
+    dao = AnalysisResultDAO(db_path)
+    capture_type_id = config_service.create_capture_type(
+        CaptureTypePayload(name="题材强度", prompt_template="模板C", is_enabled=True)
+    )
+    dao.upsert_result(
+        result_date="2026-04-18",
+        capture_type_id=capture_type_id,
+        image_path="c.png",
+        ocr_text="ocr-c",
+        ai_raw_response="raw-c",
+        final_json_text='{"theme":"AI"}',
+        now_text="2026-04-18 10:10:00",
+    )
+
+    dialog = ChatWindow(history_service=AnalysisHistoryService(db_path))
+    dialog.input_edit.setPlainText("已有问题：请帮我补充结论")
+    dialog.toggle_history_button.click()
+    dialog.history_import_buttons()[0].click()
+
+    assert dialog.input_edit.toPlainText() == '已有问题：请帮我补充结论\n{"theme":"AI"}'
+
+
+def test_bt_e8_s2_i1_02_历史内容预览压缩为单行(app: QApplication, tmp_path: Path) -> None:
+    """边界测试：历史预览文本应压缩为单行，避免占用过高。"""
+    db_path = tmp_path / "stock_capture.db"
+    DatabaseBootstrap(db_path).initialize()
+    config_service = ConfigService(db_path)
+    dao = AnalysisResultDAO(db_path)
+    capture_type_id = config_service.create_capture_type(
+        CaptureTypePayload(name="市场宽度", prompt_template="模板D", is_enabled=True)
+    )
+    long_json = '{\n  "summary": "这是一个很长很长的预览文本，需要在历史区压缩为单行展示",\n  "score": 88\n}'
+    dao.upsert_result(
+        result_date="2026-04-18",
+        capture_type_id=capture_type_id,
+        image_path="d.png",
+        ocr_text="ocr-d",
+        ai_raw_response="raw-d",
+        final_json_text=long_json,
+        now_text="2026-04-18 10:20:00",
+    )
+
+    dialog = ChatWindow(history_service=AnalysisHistoryService(db_path))
+    dialog.toggle_history_button.click()
+    preview_text = dialog.history_item_preview_texts()[0]
+
+    assert "\n" not in preview_text
+    assert len(preview_text) < len(" ".join(long_json.splitlines()))
